@@ -105,7 +105,9 @@ iosApp/fastlane/report.xml
 # git worktrees (superpowers SDD)
 .worktrees/
 
-# Local sync-server data and generated cPanel bundle
+# Python
+scripts/__pycache__/
+*.pyc
 sync-server/data/
 build/pennyKE/
 hosting/cpanel/api/config.php
