@@ -1,3 +1,5 @@
+import java.io.File
+
 plugins {
     alias(libs.plugins.kotlin.jvm)
     alias(libs.plugins.kotlin.serialization)
@@ -38,8 +40,8 @@ fun npmAvailable(): Boolean {
     } else {
         listOf("npm")
     }
-    return path.split(java.io.File.pathSeparator).any { dir ->
-        names.any { java.io.File(dir, it).isFile }
+    return path.split(File.pathSeparator).any { dir ->
+        names.any { File(dir, it).isFile }
     }
 }
 
@@ -52,13 +54,7 @@ tasks.register<Exec>("buildDashboard") {
     onlyIf {
         npmAvailable() && dashboardDir.asFile.resolve("package.json").isFile
     }
-    commandLine("npm", "install")
-    doLast {
-        exec {
-            workingDir = dashboardDir.asFile
-            commandLine("npm", "run", "build")
-        }
-    }
+    commandLine("sh", "-c", "npm install && npm run build")
     inputs.files(
         dashboardDir.file("package.json"),
         dashboardDir.file("vite.config.ts"),
