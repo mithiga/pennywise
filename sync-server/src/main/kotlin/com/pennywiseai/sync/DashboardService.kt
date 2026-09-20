@@ -72,7 +72,7 @@ class DashboardService(private val store: SyncStore) {
     fun updateTransaction(hash: String, patch: DashboardTransactionWrite): DashboardWriteResult {
         val existing = store.latestByKey(SyncEntityTypes.TRANSACTIONS, hash)
             ?: throw DashboardException(io.ktor.http.HttpStatusCode.NotFound, "transaction not found")
-        val now = LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+        val now = LocalDateTime.now().format(TIMESTAMP)
         val merged = mergePayload(existing.payload, patch, now)
         val entity = SyncEntity(
             type = SyncEntityTypes.TRANSACTIONS,
@@ -107,7 +107,7 @@ class DashboardService(private val store: SyncStore) {
         if (store.latestByKey(SyncEntityTypes.TRANSACTIONS, hash) != null) {
             throw DashboardException(io.ktor.http.HttpStatusCode.Conflict, "transaction already exists")
         }
-        val now = LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+        val now = LocalDateTime.now().format(TIMESTAMP)
         val payload = buildJsonObject {
             put("id", 0)
             put("amount", parsedAmount.toPlainString())
@@ -245,6 +245,7 @@ class DashboardService(private val store: SyncStore) {
     }
 
     companion object {
+        private val TIMESTAMP = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss")
         private val DEFAULT_CATEGORIES = listOf(
             "Food & Dining", "Groceries", "Transport", "Shopping", "Bills & Utilities",
             "Entertainment", "Health", "Others", "Income", "Transfer"

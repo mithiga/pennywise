@@ -234,16 +234,14 @@ export function TransactionInspector({
           </div>
         </div>
       ) : null}
-      <div className="field" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+      <div className="check">
         <input
           id="excluded"
           type="checkbox"
           checked={Boolean(draft.excludedFromAnalytics)}
           onChange={(event) => patch("excludedFromAnalytics", event.target.checked)}
         />
-        <label htmlFor="excluded" style={{ color: "inherit" }}>
-          Exclude from analytics
-        </label>
+        <label htmlFor="excluded">Exclude from analytics</label>
       </div>
       {error ? <div className="error">{error}</div> : null}
       <div className="inspector-actions">
