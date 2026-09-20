@@ -19,7 +19,9 @@ server keeps using the last `dashboard/dist` if present.
 On first boot a household token is printed and saved to `sync-server/data/PAIRING.txt`.
 
 Put that token and `http://<host>:8080` into Settings → Device sync on both phones.
-Open the same URL in a desktop browser and paste the token to use the ledger UI.
+Open the same URL in a desktop browser. Sign in with the pairing token, then the
+email or SMS one-time code (`TWO_FACTOR_EMAIL` / `TWO_FACTOR_PHONE`). Phones keep
+using the pairing token on `/v1/sync` only.
 
 ## Desktop dashboard
 
@@ -63,8 +65,13 @@ accepts HTTP so a LAN NAS works without extra certs.
 ## API
 
 - `GET /v1/health`
-- `POST /v1/sync` with `Authorization: Bearer <token>`
-- Dashboard (same bearer token):
+- `POST /v1/sync` with `Authorization: Bearer <pairing token>`
+- Dashboard login (public):
+  - `GET /v1/dashboard/auth`
+  - `POST /v1/dashboard/login`
+  - `POST /v1/dashboard/login/verify`
+  - `POST /v1/dashboard/logout`
+- Dashboard (session cookie or `Authorization: Bearer <session token>` — not the pairing token):
   - `GET /v1/dashboard/summary`
   - `GET /v1/dashboard/transactions`
   - `GET /v1/dashboard/transactions/{hash}`

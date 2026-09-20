@@ -1,5 +1,6 @@
 package com.pennywiseai.sync
 
+import io.ktor.client.HttpClient
 import io.ktor.client.request.delete
 import io.ktor.client.request.get
 import io.ktor.client.request.header
@@ -162,17 +163,44 @@ class SyncServerTest {
     }
 
     @Test
-    fun dashboardRequiresToken() = testApplication {
+    fun dashboardRequiresSessionNotPairingToken() = testApplication {
         val dataDir = tempDir.resolve("dash-auth").toFile()
-        application { syncModule(dataDir, tokenOverride = "secret-token") }
-        val response = client.get("/v1/dashboard/summary")
-        assertEquals(HttpStatusCode.Unauthorized, response.status)
+        val otp = CapturingOtpSender()
+        application {
+            syncModule(
+                dataDir,
+                tokenOverride = "secret-token",
+                otpSender = otp,
+                twoFactorEmail = "otp@example.test"
+            )
+        }
+        val missing = client.get("/v1/dashboard/summary")
+        assertEquals(HttpStatusCode.Unauthorized, missing.status)
+
+        val pairing = client.get("/v1/dashboard/summary") {
+            header(HttpHeaders.Authorization, "Bearer secret-token")
+        }
+        assertEquals(HttpStatusCode.Unauthorized, pairing.status)
+
+        val session = signIn(client, otp)
+        val ok = client.get("/v1/dashboard/summary") {
+            header(HttpHeaders.Authorization, "Bearer $session")
+        }
+        assertEquals(HttpStatusCode.OK, ok.status)
     }
 
     @Test
     fun dashboardReadsSnapshotAndUpdatesTransaction() = testApplication {
         val dataDir = tempDir.resolve("dash-crud").toFile()
-        application { syncModule(dataDir, tokenOverride = "secret-token") }
+        val otp = CapturingOtpSender()
+        application {
+            syncModule(
+                dataDir,
+                tokenOverride = "secret-token",
+                otpSender = otp,
+                twoFactorEmail = "otp@example.test"
+            )
+        }
 
         val month = java.time.YearMonth.now()
         val day = month.atDay(minOf(5, month.lengthOfMonth())).toString()
@@ -190,8 +218,10 @@ class SyncServerTest {
             )
         }
 
+        val session = signIn(client, otp)
+
         val summary = client.get("/v1/dashboard/summary") {
-            header(HttpHeaders.Authorization, "Bearer secret-token")
+            header(HttpHeaders.Authorization, "Bearer $session")
         }
         assertEquals(HttpStatusCode.OK, summary.status)
         val summaryBody = json.parseToJsonElement(summary.bodyAsText()).jsonObject
@@ -204,7 +234,7 @@ class SyncServerTest {
         assertTrue(!income.containsKey("INR"))
 
         val list = client.get("/v1/dashboard/transactions") {
-            header(HttpHeaders.Authorization, "Bearer secret-token")
+            header(HttpHeaders.Authorization, "Bearer $session")
         }
         val listed = json.parseToJsonElement(list.bodyAsText()).jsonObject["transactions"]!!.jsonArray
         assertEquals(3, listed.size)
@@ -213,7 +243,7 @@ class SyncServerTest {
         assertEquals("MPESA", firstSms["smsSender"]!!.jsonPrimitive.content)
 
         val updated = client.put("/v1/dashboard/transactions/hash-kes") {
-            header(HttpHeaders.Authorization, "Bearer secret-token")
+            header(HttpHeaders.Authorization, "Bearer $session")
             contentType(ContentType.Application.Json)
             setBody("""{"category":"Transport","merchantName":"Shell"}""")
         }
@@ -224,7 +254,7 @@ class SyncServerTest {
         assertTrue(updatedBody["revision"]!!.jsonPrimitive.content.toLong() >= 4)
 
         val got = client.get("/v1/dashboard/transactions/hash-kes") {
-            header(HttpHeaders.Authorization, "Bearer secret-token")
+            header(HttpHeaders.Authorization, "Bearer $session")
         }
         val gotBody = json.parseToJsonElement(got.bodyAsText()).jsonObject
         assertEquals("Shell", gotBody["merchantName"]!!.jsonPrimitive.content)
@@ -241,7 +271,7 @@ class SyncServerTest {
         assertEquals("Transport", edited["payload"]!!.jsonObject["category"]!!.jsonPrimitive.content)
 
         val accounts = client.get("/v1/dashboard/accounts") {
-            header(HttpHeaders.Authorization, "Bearer secret-token")
+            header(HttpHeaders.Authorization, "Bearer $session")
         }
         val accountList = json.parseToJsonElement(accounts.bodyAsText()).jsonObject["accounts"]!!.jsonArray
         assertEquals(1, accountList.size)
@@ -249,7 +279,7 @@ class SyncServerTest {
         assertEquals(3, accountList[0].jsonObject["transactionCount"]!!.jsonPrimitive.content.toInt())
 
         val created = client.post("/v1/dashboard/transactions") {
-            header(HttpHeaders.Authorization, "Bearer secret-token")
+            header(HttpHeaders.Authorization, "Bearer $session")
             contentType(ContentType.Application.Json)
             setBody(
                 """
@@ -263,12 +293,12 @@ class SyncServerTest {
         assertTrue(createdHash.isNotBlank())
 
         val deleted = client.delete("/v1/dashboard/transactions/$createdHash") {
-            header(HttpHeaders.Authorization, "Bearer secret-token")
+            header(HttpHeaders.Authorization, "Bearer $session")
         }
         assertEquals(HttpStatusCode.OK, deleted.status)
 
         val missing = client.get("/v1/dashboard/transactions/$createdHash") {
-            header(HttpHeaders.Authorization, "Bearer secret-token")
+            header(HttpHeaders.Authorization, "Bearer $session")
         }
         assertEquals(HttpStatusCode.NotFound, missing.status)
     }
@@ -308,6 +338,100 @@ class SyncServerTest {
         val health = client.get("/v1/health")
         assertEquals(HttpStatusCode.OK, health.status)
         assertTrue(health.bodyAsText().contains("ok"))
+    }
+
+    @Test
+    fun dashboardLoginIssuesSessionAfterOtp() = testApplication {
+        val dataDir = tempDir.resolve("dash-2fa").toFile()
+        val otp = CapturingOtpSender()
+        application {
+            syncModule(
+                dataDir,
+                tokenOverride = "secret-token",
+                otpSender = otp,
+                twoFactorEmail = "otp@example.test",
+                twoFactorPhone = "+254711111111"
+            )
+        }
+        val status = client.get("/v1/dashboard/auth")
+        assertEquals(HttpStatusCode.OK, status.status)
+        val statusBody = json.parseToJsonElement(status.bodyAsText()).jsonObject
+        assertEquals("email", statusBody["channels"]!!.jsonArray[0].jsonPrimitive.content)
+        assertTrue(statusBody["emailHint"]!!.jsonPrimitive.content.contains("*"))
+
+        val bad = client.post("/v1/dashboard/login") {
+            contentType(ContentType.Application.Json)
+            setBody("""{"token":"wrong","channel":"email"}""")
+        }
+        assertEquals(HttpStatusCode.Unauthorized, bad.status)
+
+        val login = client.post("/v1/dashboard/login") {
+            contentType(ContentType.Application.Json)
+            setBody("""{"token":"secret-token","channel":"email"}""")
+        }
+        assertEquals(HttpStatusCode.OK, login.status)
+        val challengeId = json.parseToJsonElement(login.bodyAsText()).jsonObject["challengeId"]!!.jsonPrimitive.content
+        assertTrue(otp.lastCode.matches(Regex("^[0-9]{6}$")))
+
+        val wrong = client.post("/v1/dashboard/login/verify") {
+            contentType(ContentType.Application.Json)
+            setBody("""{"challengeId":"$challengeId","code":"000000"}""")
+        }
+        assertEquals(HttpStatusCode.Unauthorized, wrong.status)
+
+        val verify = client.post("/v1/dashboard/login/verify") {
+            contentType(ContentType.Application.Json)
+            setBody("""{"challengeId":"$challengeId","code":"${otp.lastCode}"}""")
+        }
+        assertEquals(HttpStatusCode.OK, verify.status)
+        val session = json.parseToJsonElement(verify.bodyAsText()).jsonObject["sessionToken"]!!.jsonPrimitive.content
+        assertTrue(session.length >= 32)
+
+        val sync = client.post("/v1/sync") {
+            header(HttpHeaders.Authorization, "Bearer secret-token")
+            contentType(ContentType.Application.Json)
+            setBody(sampleRequest("phone-a", 0))
+        }
+        assertEquals(HttpStatusCode.OK, sync.status)
+
+        val summary = client.get("/v1/dashboard/summary") {
+            header(HttpHeaders.Authorization, "Bearer $session")
+        }
+        assertEquals(HttpStatusCode.OK, summary.status)
+    }
+
+    @Test
+    fun authServiceSendsSmsWhenConfigured() {
+        val otp = CapturingOtpSender()
+        val auth = AuthService(
+            dataDir = tempDir.resolve("auth-sms").toFile(),
+            pairingToken = "secret-token",
+            email = "otp@example.test",
+            phone = "+254711111111",
+            otpSender = otp,
+            smsUrl = "http://127.0.0.1:9/unused"
+        )
+        val status = auth.status()
+        assertEquals(listOf("email", "sms"), status.channels)
+        val challenge = auth.startLogin("secret-token", "sms", "127.0.0.1")
+        assertEquals("sms", challenge.channel)
+        assertEquals("sms", otp.lastChannel)
+        assertTrue(otp.lastCode.matches(Regex("^[0-9]{6}$")))
+    }
+
+    private suspend fun signIn(client: HttpClient, otp: CapturingOtpSender): String {
+        val login = client.post("/v1/dashboard/login") {
+            contentType(ContentType.Application.Json)
+            setBody("""{"token":"secret-token","channel":"email"}""")
+        }
+        assertEquals(HttpStatusCode.OK, login.status)
+        val challengeId = json.parseToJsonElement(login.bodyAsText()).jsonObject["challengeId"]!!.jsonPrimitive.content
+        val verify = client.post("/v1/dashboard/login/verify") {
+            contentType(ContentType.Application.Json)
+            setBody("""{"challengeId":"$challengeId","code":"${otp.lastCode}"}""")
+        }
+        assertEquals(HttpStatusCode.OK, verify.status)
+        return json.parseToJsonElement(verify.bodyAsText()).jsonObject["sessionToken"]!!.jsonPrimitive.content
     }
 
     private fun fullEntity(

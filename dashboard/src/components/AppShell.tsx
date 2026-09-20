@@ -1,5 +1,4 @@
 import type { ReactNode } from "react";
-import { getToken } from "../api";
 
 export type Page = "home" | "transactions" | "accounts";
 
@@ -20,8 +19,6 @@ export function AppShell({
   onSignOut: () => void;
   children: ReactNode;
 }) {
-  const token = getToken();
-  const hint = token.length <= 8 ? token : `${token.slice(0, 4)}…${token.slice(-4)}`;
 
   return (
     <div className="shell">
@@ -44,8 +41,8 @@ export function AppShell({
         </nav>
         <div className="sidebar-foot">
           <div>
-            <div className="muted">Pairing</div>
-            <div>Connected · {hint || "token"}</div>
+            <div className="muted">Access</div>
+            <div>Signed in</div>
           </div>
           <button type="button" onClick={onSignOut}>
             Sign out

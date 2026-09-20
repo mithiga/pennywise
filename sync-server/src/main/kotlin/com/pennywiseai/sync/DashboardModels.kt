@@ -82,4 +82,16 @@ data class DashboardWriteResult(
 @Serializable
 data class ErrorBody(val error: String)
 
+@Serializable
+data class DashboardLoginRequest(
+    val token: String? = null,
+    val channel: String? = null
+)
+
+@Serializable
+data class DashboardVerifyRequest(
+    val challengeId: String? = null,
+    val code: String? = null
+)
+
 class DashboardException(val status: io.ktor.http.HttpStatusCode, override val message: String) : RuntimeException(message)

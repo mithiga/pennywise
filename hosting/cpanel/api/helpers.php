@@ -24,6 +24,13 @@ function pennyke_config(): array
         'table_prefix' => 'pennyke_',
         'sync_token' => '',
         'sqlite_path' => '',
+        'two_factor_email' => '',
+        'two_factor_phone' => '',
+        'mail_from' => 'noreply@detective.co.ke',
+        'sms_username' => '',
+        'sms_api_key' => '',
+        'sms_url' => '',
+        'public_path' => '/pennyKE',
     ];
     return $config;
 }
@@ -75,6 +82,64 @@ function require_token(string $expected): void
     }
 }
 
+function require_dashboard(PennyKeAuth $auth): void
+{
+    if (!$auth->sessionValid(session_token())) {
+        json_error(401, 'unauthorized');
+    }
+}
+
+function session_token(): string
+{
+    $bearer = bearer_token();
+    if ($bearer !== '') {
+        return $bearer;
+    }
+    return trim((string) ($_COOKIE['pennyke_session'] ?? ''));
+}
+
+function client_ip(): string
+{
+    $forwarded = trim((string) ($_SERVER['HTTP_X_FORWARDED_FOR'] ?? ''));
+    if ($forwarded !== '') {
+        $first = trim(explode(',', $forwarded)[0]);
+        if (filter_var($first, FILTER_VALIDATE_IP)) {
+            return $first;
+        }
+    }
+    $ip = trim((string) ($_SERVER['REMOTE_ADDR'] ?? ''));
+    return $ip !== '' ? $ip : '0.0.0.0';
+}
+
+function mask_email(string $email): string
+{
+    $email = trim($email);
+    $at = strpos($email, '@');
+    if ($at === false) {
+        return '***';
+    }
+    $user = substr($email, 0, $at);
+    $domain = substr($email, $at + 1);
+    $userMask = substr($user, 0, 1) . str_repeat('*', max(1, strlen($user) - 1));
+    $dot = strpos($domain, '.');
+    if ($dot === false) {
+        return $userMask . '@***';
+    }
+    $name = substr($domain, 0, $dot);
+    $rest = substr($domain, $dot);
+    $domainMask = substr($name, 0, 1) . '***' . $rest;
+    return $userMask . '@' . $domainMask;
+}
+
+function mask_phone(string $phone): string
+{
+    $digits = preg_replace('/\D+/', '', $phone) ?? '';
+    if (strlen($digits) < 4) {
+        return '***';
+    }
+    return '+' . str_repeat('*', max(0, strlen($digits) - 4)) . substr($digits, -4);
+}
+
 function pdo_connect(array $config): PDO
 {
     if (!empty($config['sqlite_path'])) {
@@ -121,6 +186,7 @@ function ensure_schema(PDO $pdo, array $config): void
         )");
         $pdo->exec("CREATE INDEX IF NOT EXISTS idx_{$changes}_lookup ON $changes(entity_type, stable_key, revision)");
         $pdo->exec("CREATE TABLE IF NOT EXISTS $meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)");
+        create_auth_tables_sqlite($pdo, $config);
         return;
     }
     $pdo->exec("CREATE TABLE IF NOT EXISTS `$changes` (
@@ -136,6 +202,59 @@ function ensure_schema(PDO $pdo, array $config): void
     $pdo->exec("CREATE TABLE IF NOT EXISTS `$meta` (
         k VARCHAR(64) NOT NULL PRIMARY KEY,
         v VARCHAR(255) NOT NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    create_auth_tables_mysql($pdo, $config);
+}
+
+function create_auth_tables_sqlite(PDO $pdo, array $config): void
+{
+    $challenges = table($config, 'auth_challenges');
+    $sessions = table($config, 'auth_sessions');
+    $throttle = table($config, 'auth_throttle');
+    $pdo->exec("CREATE TABLE IF NOT EXISTS $challenges (
+        id TEXT PRIMARY KEY,
+        code_hash TEXT NOT NULL,
+        channel TEXT NOT NULL,
+        expires_at INTEGER NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        ip TEXT NOT NULL DEFAULT ''
+    )");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS $sessions (
+        token_hash TEXT PRIMARY KEY,
+        expires_at INTEGER NOT NULL,
+        ip TEXT NOT NULL DEFAULT '',
+        created_at INTEGER NOT NULL
+    )");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS $throttle (
+        k TEXT PRIMARY KEY,
+        window_start INTEGER NOT NULL,
+        count INTEGER NOT NULL
+    )");
+}
+
+function create_auth_tables_mysql(PDO $pdo, array $config): void
+{
+    $challenges = table($config, 'auth_challenges');
+    $sessions = table($config, 'auth_sessions');
+    $throttle = table($config, 'auth_throttle');
+    $pdo->exec("CREATE TABLE IF NOT EXISTS `$challenges` (
+        id VARCHAR(64) NOT NULL PRIMARY KEY,
+        code_hash VARCHAR(128) NOT NULL,
+        channel VARCHAR(16) NOT NULL,
+        expires_at INT NOT NULL,
+        attempts INT NOT NULL DEFAULT 0,
+        ip VARCHAR(64) NOT NULL DEFAULT ''
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS `$sessions` (
+        token_hash VARCHAR(64) NOT NULL PRIMARY KEY,
+        expires_at INT NOT NULL,
+        ip VARCHAR(64) NOT NULL DEFAULT '',
+        created_at INT NOT NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS `$throttle` (
+        k VARCHAR(128) NOT NULL PRIMARY KEY,
+        window_start INT NOT NULL,
+        count INT NOT NULL
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
 }
 

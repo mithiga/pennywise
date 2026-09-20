@@ -55,6 +55,18 @@ def write_config(dest: Path, env: dict[str, str], token: str) -> None:
     db_host = first(env, "DB_HOST", "MYSQL_HOST", "DATABASE_HOST", default="localhost")
     def php_str(value: str) -> str:
         return json.dumps(value, ensure_ascii=False)
+    email = first(env, "TWO_FACTOR_EMAIL", "2FA_EMAIL", "ADMIN_EMAIL")
+    extra_email = Path("/tmp/pennyke-2fa-email")
+    if not email and extra_email.is_file():
+        email = extra_email.read_text(encoding="utf-8").strip()
+    phone = first(env, "TWO_FACTOR_PHONE", "2FA_PHONE")
+    mail_from = first(env, "MAIL_FROM", "SMTP_FROM", default="noreply@detective.co.ke")
+    sms_user = first(env, "AFRICASTALKING_USERNAME", "AT_USERNAME", "SMS_USERNAME")
+    sms_key = first(env, "AFRICASTALKING_API_KEY", "AT_API_KEY", "SMS_API_KEY")
+    sms_url = first(env, "SMS_URL", "TWO_FACTOR_SMS_URL")
+    if not email and not phone:
+        print("TWO_FACTOR_EMAIL (or TWO_FACTOR_PHONE) is required to lock the web portal.", file=sys.stderr)
+        raise SystemExit(2)
     dest.write_text(
         "<?php\nreturn [\n"
         f"    'db_host' => {php_str(db_host)},\n"
@@ -63,6 +75,13 @@ def write_config(dest: Path, env: dict[str, str], token: str) -> None:
         f"    'db_pass' => {php_str(db_pass)},\n"
         "    'table_prefix' => 'pennyke_',\n"
         f"    'sync_token' => {php_str(token)},\n"
+        f"    'two_factor_email' => {php_str(email)},\n"
+        f"    'two_factor_phone' => {php_str(phone)},\n"
+        f"    'mail_from' => {php_str(mail_from)},\n"
+        f"    'sms_username' => {php_str(sms_user)},\n"
+        f"    'sms_api_key' => {php_str(sms_key)},\n"
+        f"    'sms_url' => {php_str(sms_url)},\n"
+        "    'public_path' => '/pennyKE',\n"
         "];\n",
         encoding="utf-8",
     )

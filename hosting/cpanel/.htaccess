@@ -7,7 +7,7 @@ RewriteBase /pennyKE/
 </Files>
 
 # Protect PHP helpers; only api/index.php is the front controller.
-RewriteRule ^api/(Store|Dashboard|helpers|config)\.php$ - [F,L]
+RewriteRule ^api/(Store|Dashboard|helpers|config|Auth)\.php$ - [F,L]
 
 # Phone + dashboard API
 RewriteRule ^v1(/.*)?$ api/index.php [QSA,L]

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { clearToken, getToken } from "./api";
+import { api, clearToken, getToken } from "./api";
 import { AppShell, type Page } from "./components/AppShell";
 import { Accounts } from "./pages/Accounts";
 import { Home } from "./pages/Home";
@@ -37,6 +37,7 @@ export function App() {
       page={page}
       onNavigate={go}
       onSignOut={() => {
+        void api.logout();
         clearToken();
         setAuthed(false);
       }}

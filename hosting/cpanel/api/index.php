@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/helpers.php';
 require_once __DIR__ . '/Store.php';
 require_once __DIR__ . '/Dashboard.php';
+require_once __DIR__ . '/Auth.php';
 
 header('X-Content-Type-Options: nosniff');
 
@@ -25,6 +26,7 @@ try {
     $pdo = pdo_connect($config);
     $store = new PennyKeStore($pdo, $config);
     $dashboard = new PennyKeDashboard($store);
+    $auth = new PennyKeAuth($pdo, $config);
     $token = (string) $config['sync_token'];
 
     if ($path === '/v1/health' && $method === 'GET') {
@@ -36,13 +38,40 @@ try {
         json_ok($store->sync(request_json()));
     }
 
+    if ($path === '/v1/dashboard/auth' && $method === 'GET') {
+        json_ok($auth->status());
+    }
+
+    if ($path === '/v1/dashboard/login' && $method === 'POST') {
+        $body = request_json();
+        json_ok($auth->startLogin(
+            trim((string) ($body['token'] ?? '')),
+            isset($body['channel']) ? (string) $body['channel'] : null,
+            client_ip()
+        ));
+    }
+
+    if ($path === '/v1/dashboard/login/verify' && $method === 'POST') {
+        $body = request_json();
+        json_ok($auth->verify(
+            (string) ($body['challengeId'] ?? ''),
+            (string) ($body['code'] ?? ''),
+            client_ip()
+        ));
+    }
+
+    if ($path === '/v1/dashboard/logout' && $method === 'POST') {
+        $auth->logout(session_token());
+        json_ok(['ok' => true]);
+    }
+
     if ($path === '/v1/dashboard/summary' && $method === 'GET') {
-        require_token($token);
+        require_dashboard($auth);
         json_ok($dashboard->summary());
     }
 
     if ($path === '/v1/dashboard/transactions' && $method === 'GET') {
-        require_token($token);
+        require_dashboard($auth);
         json_ok(['transactions' => $dashboard->listTransactions(
             $_GET['q'] ?? null,
             $_GET['type'] ?? null,
@@ -53,12 +82,12 @@ try {
     }
 
     if ($path === '/v1/dashboard/transactions' && $method === 'POST') {
-        require_token($token);
+        require_dashboard($auth);
         json_ok($dashboard->createTransaction(request_json()), 201);
     }
 
     if (preg_match('#^/v1/dashboard/transactions/([^/]+)$#', $path, $m)) {
-        require_token($token);
+        require_dashboard($auth);
         $hash = rawurldecode($m[1]);
         if ($method === 'GET') {
             json_ok($dashboard->getTransaction($hash));
@@ -73,12 +102,12 @@ try {
     }
 
     if ($path === '/v1/dashboard/accounts' && $method === 'GET') {
-        require_token($token);
+        require_dashboard($auth);
         json_ok(['accounts' => $dashboard->accounts()]);
     }
 
     if ($path === '/v1/dashboard/categories' && $method === 'GET') {
-        require_token($token);
+        require_dashboard($auth);
         json_ok(['names' => $dashboard->categories()]);
     }
 

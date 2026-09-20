@@ -5,6 +5,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/helpers.php';
 require_once __DIR__ . '/Store.php';
 require_once __DIR__ . '/Dashboard.php';
+require_once __DIR__ . '/Auth.php';
 
 function assert_true(bool $cond, string $msg): void
 {
@@ -101,6 +102,27 @@ $created = $dashboard->createTransaction([
 assert_true($created['hash'] !== '', 'manual hash');
 $dashboard->deleteTransaction($created['hash']);
 assert_true($store->latestByKey('transactions', $created['hash']) === null, 'tombstone');
+
+$sent = [];
+$config['two_factor_email'] = 'otp@example.test';
+$config['two_factor_phone'] = '+254711111111';
+$config['sms_url'] = 'http://127.0.0.1:9/unused';
+$auth = new PennyKeAuth($pdo, $config, function (string $channel, string $destination, string $code) use (&$sent): void {
+    $sent[] = ['channel' => $channel, 'destination' => $destination, 'code' => $code];
+});
+$status = $auth->status();
+assert_true($status['channels'] === ['email', 'sms'], '2FA channels');
+assert_true(is_string($status['emailHint']) && str_contains($status['emailHint'], '*'), 'email hint masked');
+$login = $auth->startLogin('secret-token', 'email', '127.0.0.1');
+assert_true(($login['channel'] ?? '') === 'email', 'email challenge');
+assert_true(count($sent) === 1 && preg_match('/^[0-9]{6}$/', $sent[0]['code']) === 1, 'otp sent');
+assert_true($auth->sessionValid('secret-token') === false, 'pairing token is not a dashboard session');
+$verified = $auth->verify($login['challengeId'], $sent[0]['code'], '127.0.0.1');
+assert_true(($verified['sessionToken'] ?? '') !== '', 'session issued');
+assert_true($auth->sessionValid($verified['sessionToken']) === true, 'session valid');
+$smsLogin = $auth->startLogin('secret-token', 'sms', '127.0.0.1');
+assert_true($sent[1]['channel'] === 'sms', 'sms otp sent');
+assert_true($smsLogin['channel'] === 'sms', 'sms challenge');
 
 @unlink($sqlite);
 fwrite(STDOUT, "PHP API tests passed\n");

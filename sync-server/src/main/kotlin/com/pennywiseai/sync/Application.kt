@@ -1,5 +1,6 @@
 package com.pennywiseai.sync
 
+import io.ktor.http.Cookie
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
@@ -34,11 +35,33 @@ fun main() {
     }.start(wait = true)
 }
 
-fun Application.syncModule(dataDir: File, tokenOverride: String? = null) {
+fun Application.syncModule(
+    dataDir: File,
+    tokenOverride: String? = null,
+    otpSender: OtpSender? = null,
+    twoFactorEmail: String? = System.getenv("TWO_FACTOR_EMAIL"),
+    twoFactorPhone: String? = System.getenv("TWO_FACTOR_PHONE")
+) {
     val store = SyncStore(dataDir)
     val token = tokenOverride ?: store.ensureToken()
     val dashboard = DashboardService(store)
     val spaDir = findSpaDir(dataDir)
+    val email = twoFactorEmail?.trim()?.ifBlank { null }
+    val phone = twoFactorPhone?.trim()?.ifBlank { null }
+    val smsUser = System.getenv("AFRICASTALKING_USERNAME") ?: System.getenv("SMS_USERNAME")
+    val smsKey = System.getenv("AFRICASTALKING_API_KEY") ?: System.getenv("SMS_API_KEY")
+    val smsUrl = System.getenv("SMS_URL") ?: System.getenv("TWO_FACTOR_SMS_URL")
+    val mailFrom = System.getenv("MAIL_FROM") ?: "noreply@localhost"
+    val auth = AuthService(
+        dataDir = dataDir,
+        pairingToken = token,
+        email = email,
+        phone = phone,
+        otpSender = otpSender ?: defaultOtpSender(dataDir, smsUser, smsKey, smsUrl, mailFrom),
+        smsUsername = smsUser,
+        smsApiKey = smsKey,
+        smsUrl = smsUrl
+    )
 
     install(ContentNegotiation) {
         json(Json {
@@ -84,18 +107,50 @@ fun Application.syncModule(dataDir: File, tokenOverride: String? = null) {
             call.respond(store.sync(request))
         }
 
+        get("/v1/dashboard/auth") {
+            call.respond(auth.status())
+        }
+        post("/v1/dashboard/login") {
+            val body = call.receive<DashboardLoginRequest>()
+            call.respond(auth.startLogin(body.token.orEmpty(), body.channel, clientIp(call)))
+        }
+        post("/v1/dashboard/login/verify") {
+            val body = call.receive<DashboardVerifyRequest>()
+            val session = auth.verify(body.challengeId.orEmpty(), body.code.orEmpty(), clientIp(call))
+            call.response.cookies.append(
+                Cookie(
+                    name = "pennyke_session",
+                    value = session.sessionToken,
+                    maxAge = session.expiresIn,
+                    path = "/",
+                    httpOnly = true,
+                    secure = call.request.header("X-Forwarded-Proto") == "https",
+                    extensions = mapOf("SameSite" to "Lax")
+                )
+            )
+            call.respond(session)
+        }
+        post("/v1/dashboard/logout") {
+            auth.logout(dashboardCredential(call))
+            call.response.cookies.append(
+                Cookie(
+                    name = "pennyke_session",
+                    value = "",
+                    maxAge = 0,
+                    path = "/",
+                    httpOnly = true,
+                    extensions = mapOf("SameSite" to "Lax")
+                )
+            )
+            call.respond(mapOf("ok" to true))
+        }
+
         get("/v1/dashboard/summary") {
-            if (!authorized(call.request.header("Authorization"), token)) {
-                call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "unauthorized"))
-                return@get
-            }
+            if (!authorizedDashboard(call, auth)) return@get
             call.respond(dashboard.summary())
         }
         get("/v1/dashboard/transactions") {
-            if (!authorized(call.request.header("Authorization"), token)) {
-                call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "unauthorized"))
-                return@get
-            }
+            if (!authorizedDashboard(call, auth)) return@get
             val items = dashboard.listTransactions(
                 query = call.request.queryParameters["q"],
                 type = call.request.queryParameters["type"],
@@ -106,51 +161,33 @@ fun Application.syncModule(dataDir: File, tokenOverride: String? = null) {
             call.respond(DashboardTransactionsResponse(items))
         }
         get("/v1/dashboard/transactions/{hash}") {
-            if (!authorized(call.request.header("Authorization"), token)) {
-                call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "unauthorized"))
-                return@get
-            }
+            if (!authorizedDashboard(call, auth)) return@get
             val hash = call.parameters["hash"].orEmpty()
             call.respond(dashboard.getTransaction(hash))
         }
         put("/v1/dashboard/transactions/{hash}") {
-            if (!authorized(call.request.header("Authorization"), token)) {
-                call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "unauthorized"))
-                return@put
-            }
+            if (!authorizedDashboard(call, auth)) return@put
             val hash = call.parameters["hash"].orEmpty()
             val body = call.receive<DashboardTransactionWrite>()
             call.respond(dashboard.updateTransaction(hash, body))
         }
         post("/v1/dashboard/transactions") {
-            if (!authorized(call.request.header("Authorization"), token)) {
-                call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "unauthorized"))
-                return@post
-            }
+            if (!authorizedDashboard(call, auth)) return@post
             val body = call.receive<DashboardTransactionWrite>()
             call.respond(HttpStatusCode.Created, dashboard.createTransaction(body))
         }
         delete("/v1/dashboard/transactions/{hash}") {
-            if (!authorized(call.request.header("Authorization"), token)) {
-                call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "unauthorized"))
-                return@delete
-            }
+            if (!authorizedDashboard(call, auth)) return@delete
             val hash = call.parameters["hash"].orEmpty()
             val revision = dashboard.deleteTransaction(hash)
             call.respond(mapOf("revision" to revision.toString(), "hash" to hash))
         }
         get("/v1/dashboard/accounts") {
-            if (!authorized(call.request.header("Authorization"), token)) {
-                call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "unauthorized"))
-                return@get
-            }
+            if (!authorizedDashboard(call, auth)) return@get
             call.respond(DashboardAccountsResponse(dashboard.accounts()))
         }
         get("/v1/dashboard/categories") {
-            if (!authorized(call.request.header("Authorization"), token)) {
-                call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "unauthorized"))
-                return@get
-            }
+            if (!authorizedDashboard(call, auth)) return@get
             call.respond(DashboardCategories(dashboard.categories()))
         }
 
@@ -200,6 +237,27 @@ fun Application.syncModule(dataDir: File, tokenOverride: String? = null) {
 private fun authorized(header: String?, token: String): Boolean {
     val auth = header?.removePrefix("Bearer")?.trim()
     return !auth.isNullOrEmpty() && auth == token
+}
+
+private fun dashboardCredential(call: io.ktor.server.application.ApplicationCall): String {
+    val header = call.request.header(HttpHeaders.Authorization)?.removePrefix("Bearer")?.trim().orEmpty()
+    if (header.isNotEmpty()) return header
+    return call.request.cookies["pennyke_session"].orEmpty()
+}
+
+private suspend fun authorizedDashboard(
+    call: io.ktor.server.application.ApplicationCall,
+    auth: AuthService
+): Boolean {
+    if (auth.sessionValid(dashboardCredential(call))) return true
+    call.respond(HttpStatusCode.Unauthorized, ErrorBody("unauthorized"))
+    return false
+}
+
+private fun clientIp(call: io.ktor.server.application.ApplicationCall): String {
+    val forwarded = call.request.header("X-Forwarded-For")?.split(",")?.firstOrNull()?.trim()
+    if (!forwarded.isNullOrBlank()) return forwarded
+    return call.request.local.remoteHost
 }
 
 private fun findPennyKeApk(dataDir: File): File? {

@@ -5,9 +5,11 @@ import type {
   TransactionWrite,
 } from "./types";
 
-const TOKEN_KEY = "pennyke.token";
+const TOKEN_KEY = "pennyke.session";
+const LEGACY_TOKEN_KEY = "pennyke.token";
 
 export function getToken(): string {
+  sessionStorage.removeItem(LEGACY_TOKEN_KEY);
   return sessionStorage.getItem(TOKEN_KEY) ?? "";
 }
 
@@ -31,7 +33,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (init.body && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
-  const response = await fetch(apiUrl(path), { ...init, headers });
+  const response = await fetch(apiUrl(path), { ...init, headers, credentials: "same-origin" });
   if (response.status === 401) {
     clearToken();
     throw new Error("unauthorized");
@@ -50,7 +52,41 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return (await response.json()) as T;
 }
 
+export type AuthChannel = "email" | "sms";
+
+export interface AuthStatus {
+  channels: AuthChannel[];
+  emailHint: string | null;
+  phoneHint: string | null;
+}
+
+export interface LoginChallenge {
+  challengeId: string;
+  channel: AuthChannel | string;
+  destinationHint: string;
+  expiresIn: number;
+}
+
 export const api = {
+  authStatus: () => request<AuthStatus>("/v1/dashboard/auth"),
+  login: (token: string, channel: AuthChannel) =>
+    request<LoginChallenge>("/v1/dashboard/login", {
+      method: "POST",
+      body: JSON.stringify({ token, channel }),
+    }),
+  verify: (challengeId: string, code: string) =>
+    request<{ sessionToken: string; expiresAt: string; expiresIn: number }>("/v1/dashboard/login/verify", {
+      method: "POST",
+      body: JSON.stringify({ challengeId, code }),
+    }),
+  logout: async () => {
+    try {
+      await request<{ ok: boolean }>("/v1/dashboard/logout", { method: "POST" });
+    } catch {
+      /* still clear local session */
+    }
+    clearToken();
+  },
   summary: () => request<DashboardSummary>("/v1/dashboard/summary"),
   transactions: (params: Record<string, string | undefined> = {}) => {
     const query = new URLSearchParams();
