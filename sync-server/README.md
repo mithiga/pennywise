@@ -36,6 +36,19 @@ npm run build    # writes dashboard/dist for Ktor
 
 Ktor still serves `/PennyKE.apk` and `/v1/sync` alongside the SPA.
 
+## cPanel (detective.co.ke/pennyKE)
+
+Shared hosting cannot run the Kotlin server. Use the PHP + MySQL bundle in
+[`hosting/cpanel`](../hosting/cpanel) and:
+
+```bash
+./scripts/deploy-detective.sh /path/to/Detective/.env
+```
+
+Phones then use `https://detective.co.ke/pennyKE` as the sync URL. Tables are
+prefixed `pennyke_` so they can share the existing cPanel MySQL database.
+
+
 ## Docker
 
 ```bash

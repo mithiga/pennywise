@@ -1,0 +1,20 @@
+RewriteEngine On
+RewriteBase /pennyKE/
+
+# Never serve PHP config.
+<Files "config.php">
+  Require all denied
+</Files>
+
+# Protect PHP helpers; only api/index.php is the front controller.
+RewriteRule ^api/(Store|Dashboard|helpers|config)\.php$ - [F,L]
+
+# Phone + dashboard API
+RewriteRule ^v1(/.*)?$ api/index.php [QSA,L]
+
+# Existing files (SPA assets, APK)
+RewriteCond %{REQUEST_FILENAME} -f
+RewriteRule ^ - [L]
+
+# Hash-routed SPA
+RewriteRule ^ index.html [L]
