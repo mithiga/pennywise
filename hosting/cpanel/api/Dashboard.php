@@ -36,8 +36,8 @@ final class PennyKeDashboard
         ));
         usort($transactions, fn($a, $b) => strcmp($b['dateTime'], $a['dateTime']));
         return [
-            'income' => $income,
-            'expense' => $expense,
+            'income' => (object) $income,
+            'expense' => (object) $expense,
             'accounts' => $this->accounts(),
             'recent' => array_slice($transactions, 0, 8),
         ];
