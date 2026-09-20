@@ -156,8 +156,8 @@ interface TransactionDao {
     @Query("DELETE FROM transactions WHERE loan_id IS NULL AND group_id IS NULL")
     suspend fun deleteUncuratedTransactions()
     
-    @Query("UPDATE transactions SET category = :newCategory WHERE merchant_name = :merchantName")
-    suspend fun updateCategoryForMerchant(merchantName: String, newCategory: String)
+    @Query("UPDATE transactions SET category = :newCategory, updated_at = :updatedAt WHERE merchant_name = :merchantName")
+    suspend fun updateCategoryForMerchant(merchantName: String, newCategory: String, updatedAt: LocalDateTime)
 
     @Query("UPDATE transactions SET category = :category, updated_at = :updatedAt WHERE id = :transactionId")
     suspend fun updateCategoryById(transactionId: Long, category: String, updatedAt: LocalDateTime)

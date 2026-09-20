@@ -13,8 +13,11 @@ import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
 import javax.inject.Inject
 
 @HiltAndroidApp
@@ -37,6 +40,15 @@ class PennyWiseApplication : Application(), Configuration.Provider {
 
     @Inject
     lateinit var scheduledFolderBackupScheduler: com.pennywiseai.tracker.backup.folder.ScheduledFolderBackupScheduler
+
+    @Inject
+    lateinit var deviceSyncScheduler: com.pennywiseai.tracker.data.sync.DeviceSyncScheduler
+
+    @Inject
+    lateinit var syncCoordinator: com.pennywiseai.tracker.data.sync.SyncCoordinator
+
+    @Inject
+    lateinit var syncChangeBus: com.pennywiseai.tracker.data.sync.SyncChangeBus
 
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var activityReferences = 0
@@ -76,6 +88,37 @@ class PennyWiseApplication : Application(), Configuration.Provider {
         applicationScope.launch {
             if (userPreferencesRepository.isScheduledFolderBackupEnabled()) {
                 scheduledFolderBackupScheduler.schedule()
+            }
+        }
+
+        applicationScope.launch {
+            if (userPreferencesRepository.deviceSyncEnabled.first()) {
+                deviceSyncScheduler.schedulePeriodic()
+            }
+        }
+
+        applicationScope.launch {
+            syncChangeBus.changes.collectLatest { change ->
+                when (change) {
+                    is com.pennywiseai.tracker.data.sync.SyncLocalChange.Dirty ->
+                        userPreferencesRepository.setDeviceSyncDirty(true)
+                    is com.pennywiseai.tracker.data.sync.SyncLocalChange.PreferencesDirty ->
+                        userPreferencesRepository.setDeviceSyncPreferencesDirty(true)
+                    is com.pennywiseai.tracker.data.sync.SyncLocalChange.Delete ->
+                        syncCoordinator.enqueueDelete(change.type, change.key)
+                }
+                if (userPreferencesRepository.deviceSyncEnabled.first()) {
+                    deviceSyncScheduler.enqueueNow()
+                }
+            }
+        }
+
+        applicationScope.launch {
+            while (isActive) {
+                delay(5_000)
+                if (isAppInForeground && userPreferencesRepository.deviceSyncEnabled.first()) {
+                    syncCoordinator.sync()
+                }
             }
         }
 

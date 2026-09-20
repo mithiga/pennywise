@@ -104,3 +104,6 @@ iosApp/fastlane/report.xml
 
 # git worktrees (superpowers SDD)
 .worktrees/
+
+# Personal two-phone sync server local data (token + sqlite)
+sync-server/data/

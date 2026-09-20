@@ -1,5 +1,5 @@
 {
-  "totalBanks": 157,
+  "totalBanks": 158,
   "totalCountries": 24,
   "countries": [
     {
@@ -123,6 +123,14 @@
       "banks": ["BPCE", "Sparkasse Rhein-Maas"]
     },
     {
+      "country": "Kenya",
+      "flag": "🇰🇪",
+      "currency": "KES",
+      "symbol": "Ksh",
+      "bankCount": 2,
+      "banks": ["M-PESA", "Standard Chartered Bank Kenya"]
+    },
+    {
       "country": "Bangladesh",
       "flag": "🇧🇩",
       "currency": "BDT",
@@ -153,14 +161,6 @@
       "symbol": "Kč",
       "bankCount": 1,
       "banks": ["mBank CZ"]
-    },
-    {
-      "country": "Kenya",
-      "flag": "🇰🇪",
-      "currency": "KES",
-      "symbol": "Ksh",
-      "bankCount": 1,
-      "banks": ["M-PESA"]
     },
     {
       "country": "Oman",

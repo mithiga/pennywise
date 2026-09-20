@@ -164,6 +164,17 @@ open class UserPreferencesRepository @Inject constructor(
         val SCHEDULED_FOLDER_BACKUP_ENABLED = booleanPreferencesKey("scheduled_folder_backup_enabled")
         val SCHEDULED_FOLDER_BACKUP_TREE_URI = stringPreferencesKey("scheduled_folder_backup_tree_uri")
         val SCHEDULED_FOLDER_BACKUP_LAST_TIMESTAMP = longPreferencesKey("scheduled_folder_backup_last_timestamp")
+
+        val DEVICE_SYNC_ENABLED = booleanPreferencesKey("device_sync_enabled")
+        val DEVICE_SYNC_SERVER_URL = stringPreferencesKey("device_sync_server_url")
+        val DEVICE_SYNC_TOKEN = stringPreferencesKey("device_sync_token")
+        val DEVICE_SYNC_DEVICE_ID = stringPreferencesKey("device_sync_device_id")
+        val DEVICE_SYNC_DEVICE_NAME = stringPreferencesKey("device_sync_device_name")
+        val DEVICE_SYNC_REVISION = longPreferencesKey("device_sync_revision")
+        val DEVICE_SYNC_DIRTY = booleanPreferencesKey("device_sync_dirty")
+        val DEVICE_SYNC_PREFERENCES_DIRTY = booleanPreferencesKey("device_sync_preferences_dirty")
+        val DEVICE_SYNC_PENDING_DELETES = stringPreferencesKey("device_sync_pending_deletes")
+        val DEVICE_SYNC_LAST_STATUS = stringPreferencesKey("device_sync_last_status")
     }
 
     private companion object {
@@ -955,6 +966,69 @@ open class UserPreferencesRepository @Inject constructor(
         context.dataStore.edit { preferences ->
             preferences[PreferencesKeys.SCHEDULED_FOLDER_BACKUP_LAST_TIMESTAMP] = timestamp
         }
+    }
+
+    val deviceSyncEnabled: Flow<Boolean> = context.dataStore.data
+        .map { it[PreferencesKeys.DEVICE_SYNC_ENABLED] ?: false }
+    val deviceSyncServerUrl: Flow<String> = context.dataStore.data
+        .map { it[PreferencesKeys.DEVICE_SYNC_SERVER_URL] ?: "" }
+    val deviceSyncToken: Flow<String> = context.dataStore.data
+        .map { it[PreferencesKeys.DEVICE_SYNC_TOKEN] ?: "" }
+    val deviceSyncDeviceName: Flow<String> = context.dataStore.data
+        .map { it[PreferencesKeys.DEVICE_SYNC_DEVICE_NAME] ?: "" }
+    val deviceSyncRevision: Flow<Long> = context.dataStore.data
+        .map { it[PreferencesKeys.DEVICE_SYNC_REVISION] ?: 0L }
+    val deviceSyncDirty: Flow<Boolean> = context.dataStore.data
+        .map { it[PreferencesKeys.DEVICE_SYNC_DIRTY] ?: false }
+    val deviceSyncPreferencesDirty: Flow<Boolean> = context.dataStore.data
+        .map { it[PreferencesKeys.DEVICE_SYNC_PREFERENCES_DIRTY] ?: false }
+    val deviceSyncPendingDeletes: Flow<String> = context.dataStore.data
+        .map { it[PreferencesKeys.DEVICE_SYNC_PENDING_DELETES] ?: "[]" }
+    val deviceSyncLastStatus: Flow<String> = context.dataStore.data
+        .map { it[PreferencesKeys.DEVICE_SYNC_LAST_STATUS] ?: "" }
+
+    suspend fun setDeviceSyncEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.DEVICE_SYNC_ENABLED] = enabled }
+    }
+
+    suspend fun setDeviceSyncServerUrl(url: String) {
+        context.dataStore.edit { it[PreferencesKeys.DEVICE_SYNC_SERVER_URL] = url }
+    }
+
+    suspend fun setDeviceSyncToken(token: String) {
+        context.dataStore.edit { it[PreferencesKeys.DEVICE_SYNC_TOKEN] = token }
+    }
+
+    suspend fun setDeviceSyncDeviceName(name: String) {
+        context.dataStore.edit { it[PreferencesKeys.DEVICE_SYNC_DEVICE_NAME] = name }
+    }
+
+    suspend fun setDeviceSyncRevision(revision: Long) {
+        context.dataStore.edit { it[PreferencesKeys.DEVICE_SYNC_REVISION] = revision }
+    }
+
+    suspend fun setDeviceSyncDirty(dirty: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.DEVICE_SYNC_DIRTY] = dirty }
+    }
+
+    suspend fun setDeviceSyncPreferencesDirty(dirty: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.DEVICE_SYNC_PREFERENCES_DIRTY] = dirty }
+    }
+
+    suspend fun setDeviceSyncPendingDeletes(json: String) {
+        context.dataStore.edit { it[PreferencesKeys.DEVICE_SYNC_PENDING_DELETES] = json }
+    }
+
+    suspend fun setDeviceSyncLastStatus(status: String) {
+        context.dataStore.edit { it[PreferencesKeys.DEVICE_SYNC_LAST_STATUS] = status }
+    }
+
+    suspend fun ensureDeviceSyncId(): String {
+        val existing = context.dataStore.data.map { it[PreferencesKeys.DEVICE_SYNC_DEVICE_ID] }.first()
+        if (!existing.isNullOrBlank()) return existing
+        val generated = java.util.UUID.randomUUID().toString()
+        context.dataStore.edit { it[PreferencesKeys.DEVICE_SYNC_DEVICE_ID] = generated }
+        return generated
     }
 }
 

@@ -111,6 +111,7 @@ object BankParserFactory {
         DhanlaxmiBankParser(),  // Dhanlaxmi Bank (India)
         DOPBankParser(),  // Department of Post (India)
         HuntingtonBankParser(),  // Huntington Bank (USA)
+        StandardCharteredKenyaParser(),  // Standard Chartered Kenya KES card spends — before shared-sender family
         StandardCharteredNigeriaParser(),  // Standard Chartered Bank Nigeria - must precede the India/Pakistan parser (shared sender)
         StandardCharteredBankParser(),  // Standard Chartered Bank (India and Pakistan)
         EquitasBankParser(),  // Equitas Small Finance Bank (India)
