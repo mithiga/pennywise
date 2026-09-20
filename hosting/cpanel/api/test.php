@@ -43,6 +43,8 @@ $store->sync([
                 'dateTime' => $day,
                 'bankName' => 'M-PESA',
                 'accountNumber' => '1234',
+                'smsBody' => 'Confirmed. KES 500.00 paid to Naivas.',
+                'smsSender' => 'MPESA',
             ],
         ],
         [
@@ -65,9 +67,13 @@ $store->sync([
 ]);
 
 $summary = $dashboard->summary();
-assert_true(($summary['expense']['KES'] ?? null) === '500.00', 'KES expense');
-assert_true(($summary['expense']['INR'] ?? null) === '100.00', 'INR expense');
-assert_true(!isset($summary['expense']['total']), 'no mixed total');
+$expenseMap = $summary['expense'];
+$expense = is_array($expenseMap) ? $expenseMap : get_object_vars($expenseMap);
+assert_true(($expense['KES'] ?? null) === '500.00', 'KES expense');
+assert_true(($expense['INR'] ?? null) === '100.00', 'INR expense');
+assert_true(!isset($expense['total']), 'no mixed total');
+$got = $dashboard->getTransaction('hash-kes');
+assert_true(($got['smsBody'] ?? null) === 'Confirmed. KES 500.00 paid to Naivas.', 'sms body');
 
 $updated = $dashboard->updateTransaction('hash-kes', [
     'category' => 'Transport',

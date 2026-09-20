@@ -292,6 +292,35 @@ th.amount { text-align: right; }
   gap: 8px;
   margin-top: 16px;
 }
+.sms-box {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  margin: 8px 0 4px;
+  overflow: hidden;
+}
+.sms-toggle {
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: var(--surface-2);
+  padding: 10px 12px;
+  cursor: pointer;
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 13px;
+}
+.sms-body {
+  margin: 0;
+  padding: 12px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.sms-body pre {
+  margin: 6px 0 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
 
 .login {
   min-height: 100vh;

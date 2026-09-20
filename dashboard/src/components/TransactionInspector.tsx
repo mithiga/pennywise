@@ -69,9 +69,11 @@ export function TransactionInspector({
   const [draft, setDraft] = useState<TransactionWrite>(emptyDraft);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [showSms, setShowSms] = useState(false);
 
   useEffect(() => {
     setError("");
+    setShowSms(false);
     if (mode === "edit" && transaction) setDraft(fromTransaction(transaction));
     else setDraft(emptyDraft());
   }, [mode, transaction]);
@@ -243,6 +245,19 @@ export function TransactionInspector({
         />
         <label htmlFor="excluded">Exclude from analytics</label>
       </div>
+      {mode === "edit" && transaction?.smsBody ? (
+        <div className="sms-box">
+          <button type="button" className="sms-toggle" onClick={() => setShowSms((open) => !open)}>
+            {showSms ? "Hide SMS" : "Show original SMS"}
+          </button>
+          {showSms ? (
+            <div className="sms-body">
+              {transaction.smsSender ? <div className="muted">{transaction.smsSender}</div> : null}
+              <pre>{transaction.smsBody}</pre>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
       {error ? <div className="error">{error}</div> : null}
       <div className="inspector-actions">
         <button className="btn" type="submit" disabled={busy}>

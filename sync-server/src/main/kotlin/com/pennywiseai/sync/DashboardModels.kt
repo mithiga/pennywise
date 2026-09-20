@@ -25,7 +25,9 @@ data class DashboardTransaction(
     val fromAccount: String? = null,
     val toAccount: String? = null,
     val excludedFromAnalytics: Boolean = false,
-    val updatedAt: String? = null
+    val updatedAt: String? = null,
+    val smsBody: String? = null,
+    val smsSender: String? = null
 )
 
 @Serializable

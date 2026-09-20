@@ -208,6 +208,9 @@ class SyncServerTest {
         }
         val listed = json.parseToJsonElement(list.bodyAsText()).jsonObject["transactions"]!!.jsonArray
         assertEquals(3, listed.size)
+        val firstSms = listed.first { it.jsonObject["hash"]!!.jsonPrimitive.content == "hash-kes" }.jsonObject
+        assertEquals("Confirmed. KES 500.00 paid to Sample hash-kes.", firstSms["smsBody"]!!.jsonPrimitive.content)
+        assertEquals("MPESA", firstSms["smsSender"]!!.jsonPrimitive.content)
 
         val updated = client.put("/v1/dashboard/transactions/hash-kes") {
             header(HttpHeaders.Authorization, "Bearer secret-token")
@@ -326,6 +329,8 @@ class SyncServerTest {
             put("dateTime", dateTime)
             put("bankName", "M-PESA")
             put("accountNumber", "1234")
+            put("smsBody", "Confirmed. KES 500.00 paid to Sample $hash.")
+            put("smsSender", "MPESA")
         },
         updatedAt = dateTime
     )

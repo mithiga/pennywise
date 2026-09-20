@@ -17,6 +17,8 @@ export interface DashboardTransaction {
   toAccount: string | null;
   excludedFromAnalytics: boolean;
   updatedAt: string | null;
+  smsBody: string | null;
+  smsSender: string | null;
 }
 
 export interface DashboardAccount {

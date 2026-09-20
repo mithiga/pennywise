@@ -52,7 +52,8 @@ class DashboardService(private val store: SyncStore) {
                     tx.merchantName.lowercase().contains(q) ||
                     tx.category.lowercase().contains(q) ||
                     (tx.description?.lowercase()?.contains(q) == true) ||
-                    (tx.bankName?.lowercase()?.contains(q) == true)
+                    (tx.bankName?.lowercase()?.contains(q) == true) ||
+                    (tx.smsBody?.lowercase()?.contains(q) == true)
             }
             .filter { type.isNullOrBlank() || it.transactionType.equals(type, ignoreCase = true) }
             .filter { account.isNullOrBlank() || accountKey(it.bankName, it.accountNumber) == account }
@@ -315,7 +316,9 @@ private fun SyncEntity.toTransaction(): DashboardTransaction? {
         fromAccount = payload.str("fromAccount"),
         toAccount = payload.str("toAccount"),
         excludedFromAnalytics = payload.bool("excludedFromAnalytics"),
-        updatedAt = payload.str("updatedAt") ?: updatedAt
+        updatedAt = payload.str("updatedAt") ?: updatedAt,
+        smsBody = payload.str("smsBody"),
+        smsSender = payload.str("smsSender")
     )
 }
 

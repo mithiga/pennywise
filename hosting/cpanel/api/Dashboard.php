@@ -51,7 +51,7 @@ final class PennyKeDashboard
         $items = [];
         foreach ($this->allTransactions() as $tx) {
             if ($q !== '') {
-                $hay = strtolower($tx['merchantName'] . ' ' . $tx['category'] . ' ' . ($tx['description'] ?? '') . ' ' . ($tx['bankName'] ?? ''));
+                $hay = strtolower($tx['merchantName'] . ' ' . $tx['category'] . ' ' . ($tx['description'] ?? '') . ' ' . ($tx['bankName'] ?? '') . ' ' . ($tx['smsBody'] ?? ''));
                 if (!str_contains($hay, $q)) {
                     continue;
                 }
@@ -331,6 +331,8 @@ final class PennyKeDashboard
             'toAccount' => payload_str($payload, 'toAccount'),
             'excludedFromAnalytics' => payload_bool($payload, 'excludedFromAnalytics'),
             'updatedAt' => payload_str($payload, 'updatedAt') ?? $entity['updated_at'],
+            'smsBody' => payload_str($payload, 'smsBody'),
+            'smsSender' => payload_str($payload, 'smsSender'),
         ];
     }
 
