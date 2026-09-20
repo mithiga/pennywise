@@ -53,4 +53,9 @@ data class SyncTombstone(
 object SyncEntityTypes {
     const val PREFERENCES = "preferences"
     const val PREFERENCES_KEY = "global"
+    const val TRANSACTIONS = "transactions"
+    const val CATEGORIES = "categories"
+    const val CARDS = "cards"
+    const val ACCOUNT_BALANCES = "account_balances"
+    const val DASHBOARD_DEVICE = "pennyke-web"
 }

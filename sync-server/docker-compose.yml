@@ -12,4 +12,5 @@ services:
       # SYNC_TOKEN: replace-me
     volumes:
       - ./data:/data
+      - ../dashboard/dist:/app/dashboard/dist:ro
     restart: unless-stopped

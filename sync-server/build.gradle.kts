@@ -31,10 +31,53 @@ tasks.withType<Test>().configureEach {
     useJUnitPlatform()
 }
 
+fun npmAvailable(): Boolean {
+    val path = System.getenv("PATH") ?: return false
+    val names = if (System.getProperty("os.name").startsWith("Windows", ignoreCase = true)) {
+        listOf("npm.cmd", "npm.exe")
+    } else {
+        listOf("npm")
+    }
+    return path.split(java.io.File.pathSeparator).any { dir ->
+        names.any { java.io.File(dir, it).isFile }
+    }
+}
+
+val dashboardDir = rootProject.layout.projectDirectory.dir("dashboard")
+
+tasks.register<Exec>("buildDashboard") {
+    group = "build"
+    description = "Build the desktop dashboard SPA when Node.js/npm is on PATH"
+    workingDir = dashboardDir.asFile
+    onlyIf {
+        npmAvailable() && dashboardDir.asFile.resolve("package.json").isFile
+    }
+    commandLine("npm", "install")
+    doLast {
+        exec {
+            workingDir = dashboardDir.asFile
+            commandLine("npm", "run", "build")
+        }
+    }
+    inputs.files(
+        dashboardDir.file("package.json"),
+        dashboardDir.file("vite.config.ts"),
+        dashboardDir.file("tsconfig.json"),
+        dashboardDir.file("index.html")
+    )
+    inputs.dir(dashboardDir.dir("src"))
+    outputs.dir(dashboardDir.dir("dist"))
+}
+
+tasks.named("run") {
+    dependsOn("buildDashboard")
+}
+
 tasks.register<Jar>("fatJar") {
     group = "build"
     archiveClassifier.set("all")
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    dependsOn("buildDashboard")
     manifest {
         attributes["Main-Class"] = "com.pennywiseai.sync.ApplicationKt"
     }

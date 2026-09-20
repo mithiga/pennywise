@@ -36,6 +36,47 @@ class SyncStore(
         return generated
     }
 
+    fun latestLive(type: String): List<SyncEntity> {
+        dataDir.mkdirs()
+        connection().use { conn ->
+            ensureSchema(conn)
+            return latestLive(conn, type)
+        }
+    }
+
+    fun latestByKey(type: String, key: String): SyncEntity? {
+        dataDir.mkdirs()
+        connection().use { conn ->
+            ensureSchema(conn)
+            val row = latestRow(conn, type, key)
+            if (row == null || row.deleted || row.payload == null) return null
+            return SyncEntity(
+                type = type,
+                key = key,
+                payload = json.decodeFromString(row.payload),
+                updatedAt = row.updatedAt
+            )
+        }
+    }
+
+    fun applyLocal(request: SyncRequest): Long {
+        dataDir.mkdirs()
+        connection().use { conn ->
+            conn.autoCommit = false
+            try {
+                ensureSchema(conn)
+                applyUpserts(conn, request)
+                applyDeletes(conn, request)
+                val revision = currentRevision(conn)
+                conn.commit()
+                return revision
+            } catch (e: Exception) {
+                conn.rollback()
+                throw e
+            }
+        }
+    }
+
     fun sync(request: SyncRequest): SyncResponse {
         dataDir.mkdirs()
         connection().use { conn ->
@@ -175,6 +216,40 @@ class SyncStore(
             deletes = deletes,
             preferencePatch = preferencePatch
         )
+    }
+
+    private fun latestLive(conn: Connection, type: String): List<SyncEntity> {
+        val items = mutableListOf<SyncEntity>()
+        conn.prepareStatement(
+            """
+            SELECT c.stable_key, c.payload, c.updated_at
+            FROM changes c
+            INNER JOIN (
+                SELECT entity_type, stable_key, MAX(revision) AS max_rev
+                FROM changes
+                WHERE entity_type = ?
+                GROUP BY entity_type, stable_key
+            ) latest
+              ON c.entity_type = latest.entity_type
+             AND c.stable_key = latest.stable_key
+             AND c.revision = latest.max_rev
+            WHERE c.deleted = 0 AND c.payload IS NOT NULL
+            """.trimIndent()
+        ).use { stmt ->
+            stmt.setString(1, type)
+            stmt.executeQuery().use { rs ->
+                while (rs.next()) {
+                    val payload = rs.getString("payload") ?: continue
+                    items += SyncEntity(
+                        type = type,
+                        key = rs.getString("stable_key"),
+                        payload = json.decodeFromString(payload),
+                        updatedAt = rs.getString("updated_at")
+                    )
+                }
+            }
+        }
+        return items
     }
 
     private fun currentRevision(conn: Connection): Long {

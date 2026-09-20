@@ -107,3 +107,7 @@ iosApp/fastlane/report.xml
 
 # Personal two-phone sync server local data (token + sqlite)
 sync-server/data/
+
+# Desktop dashboard (Vite) — source is tracked; install/build output is not
+dashboard/node_modules/
+dashboard/dist/

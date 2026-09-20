@@ -1,8 +1,10 @@
 package com.pennywiseai.sync
 
+import io.ktor.client.request.delete
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.post
+import io.ktor.client.request.put
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
@@ -158,6 +160,175 @@ class SyncServerTest {
         val staleBody = json.parseToJsonElement(stale.bodyAsText()).jsonObject
         assertEquals(2, staleBody["revision"]!!.jsonPrimitive.content.toLong())
     }
+
+    @Test
+    fun dashboardRequiresToken() = testApplication {
+        val dataDir = tempDir.resolve("dash-auth").toFile()
+        application { syncModule(dataDir, tokenOverride = "secret-token") }
+        val response = client.get("/v1/dashboard/summary")
+        assertEquals(HttpStatusCode.Unauthorized, response.status)
+    }
+
+    @Test
+    fun dashboardReadsSnapshotAndUpdatesTransaction() = testApplication {
+        val dataDir = tempDir.resolve("dash-crud").toFile()
+        application { syncModule(dataDir, tokenOverride = "secret-token") }
+
+        val month = java.time.YearMonth.now()
+        val day = month.atDay(minOf(5, month.lengthOfMonth())).toString()
+        client.post("/v1/sync") {
+            header(HttpHeaders.Authorization, "Bearer secret-token")
+            contentType(ContentType.Application.Json)
+            setBody(
+                sampleRequest(
+                    "phone-a",
+                    0,
+                    fullEntity("hash-kes", "500.00", "KES", "EXPENSE", "${day}T10:00:00"),
+                    fullEntity("hash-inr", "100.00", "INR", "EXPENSE", "${day}T11:00:00"),
+                    fullEntity("hash-inc", "200.00", "KES", "INCOME", "${day}T09:00:00")
+                )
+            )
+        }
+
+        val summary = client.get("/v1/dashboard/summary") {
+            header(HttpHeaders.Authorization, "Bearer secret-token")
+        }
+        assertEquals(HttpStatusCode.OK, summary.status)
+        val summaryBody = json.parseToJsonElement(summary.bodyAsText()).jsonObject
+        val expense = summaryBody["expense"]!!.jsonObject
+        val income = summaryBody["income"]!!.jsonObject
+        assertEquals("500.00", expense["KES"]!!.jsonPrimitive.content)
+        assertEquals("100.00", expense["INR"]!!.jsonPrimitive.content)
+        assertEquals("200.00", income["KES"]!!.jsonPrimitive.content)
+        assertTrue(!expense.containsKey("total"))
+        assertTrue(!income.containsKey("INR"))
+
+        val list = client.get("/v1/dashboard/transactions") {
+            header(HttpHeaders.Authorization, "Bearer secret-token")
+        }
+        val listed = json.parseToJsonElement(list.bodyAsText()).jsonObject["transactions"]!!.jsonArray
+        assertEquals(3, listed.size)
+
+        val updated = client.put("/v1/dashboard/transactions/hash-kes") {
+            header(HttpHeaders.Authorization, "Bearer secret-token")
+            contentType(ContentType.Application.Json)
+            setBody("""{"category":"Transport","merchantName":"Shell"}""")
+        }
+        assertEquals(HttpStatusCode.OK, updated.status)
+        val updatedBody = json.parseToJsonElement(updated.bodyAsText()).jsonObject
+        assertEquals("hash-kes", updatedBody["hash"]!!.jsonPrimitive.content)
+        assertEquals("Transport", updatedBody["transaction"]!!.jsonObject["category"]!!.jsonPrimitive.content)
+        assertTrue(updatedBody["revision"]!!.jsonPrimitive.content.toLong() >= 4)
+
+        val got = client.get("/v1/dashboard/transactions/hash-kes") {
+            header(HttpHeaders.Authorization, "Bearer secret-token")
+        }
+        val gotBody = json.parseToJsonElement(got.bodyAsText()).jsonObject
+        assertEquals("Shell", gotBody["merchantName"]!!.jsonPrimitive.content)
+        assertEquals("Transport", gotBody["category"]!!.jsonPrimitive.content)
+
+        val phonePull = client.post("/v1/sync") {
+            header(HttpHeaders.Authorization, "Bearer secret-token")
+            contentType(ContentType.Application.Json)
+            setBody(sampleRequest("phone-b", 0))
+        }
+        val phoneUpserts = json.parseToJsonElement(phonePull.bodyAsText()).jsonObject["upserts"]!!.jsonArray
+        val edited = phoneUpserts.first { it.jsonObject["key"]!!.jsonPrimitive.content == "hash-kes" }.jsonObject
+        assertEquals("Shell", edited["payload"]!!.jsonObject["merchantName"]!!.jsonPrimitive.content)
+        assertEquals("Transport", edited["payload"]!!.jsonObject["category"]!!.jsonPrimitive.content)
+
+        val accounts = client.get("/v1/dashboard/accounts") {
+            header(HttpHeaders.Authorization, "Bearer secret-token")
+        }
+        val accountList = json.parseToJsonElement(accounts.bodyAsText()).jsonObject["accounts"]!!.jsonArray
+        assertEquals(1, accountList.size)
+        assertEquals("M-PESA", accountList[0].jsonObject["bankName"]!!.jsonPrimitive.content)
+        assertEquals(3, accountList[0].jsonObject["transactionCount"]!!.jsonPrimitive.content.toInt())
+
+        val created = client.post("/v1/dashboard/transactions") {
+            header(HttpHeaders.Authorization, "Bearer secret-token")
+            contentType(ContentType.Application.Json)
+            setBody(
+                """
+                {"amount":"75.50","merchantName":"Java House","category":"Food & Dining",
+                 "transactionType":"EXPENSE","dateTime":"2026-09-20T08:00:00","currency":"KES"}
+                """.trimIndent()
+            )
+        }
+        assertEquals(HttpStatusCode.Created, created.status)
+        val createdHash = json.parseToJsonElement(created.bodyAsText()).jsonObject["hash"]!!.jsonPrimitive.content
+        assertTrue(createdHash.isNotBlank())
+
+        val deleted = client.delete("/v1/dashboard/transactions/$createdHash") {
+            header(HttpHeaders.Authorization, "Bearer secret-token")
+        }
+        assertEquals(HttpStatusCode.OK, deleted.status)
+
+        val missing = client.get("/v1/dashboard/transactions/$createdHash") {
+            header(HttpHeaders.Authorization, "Bearer secret-token")
+        }
+        assertEquals(HttpStatusCode.NotFound, missing.status)
+    }
+
+    @Test
+    fun latestLiveOmitsTombstones() {
+        val store = SyncStore(tempDir.resolve("snapshot").toFile())
+        store.applyLocal(
+            SyncRequest(
+                deviceId = "phone-a",
+                upserts = listOf(fullEntity("hash-1", "10.00", "KES", "EXPENSE", "2026-09-20T10:00:00"))
+            )
+        )
+        assertEquals(1, store.latestLive("transactions").size)
+        store.applyLocal(
+            SyncRequest(
+                deviceId = "pennyke-web",
+                deletes = listOf(SyncTombstone(type = "transactions", key = "hash-1"))
+            )
+        )
+        assertTrue(store.latestLive("transactions").isEmpty())
+        assertEquals(null, store.latestByKey("transactions", "hash-1"))
+    }
+
+    @Test
+    fun servesSpaAndKeepsHealthWhenDistExists() = testApplication {
+        val dataDir = tempDir.resolve("spa-data").toFile()
+        val spa = File(dataDir.parentFile, "dashboard/dist")
+        spa.mkdirs()
+        File(spa, "index.html").writeText("<html>PennyKE desktop</html>")
+        application { syncModule(dataDir, tokenOverride = "secret-token") }
+
+        val home = client.get("/")
+        assertEquals(HttpStatusCode.OK, home.status)
+        assertTrue(home.bodyAsText().contains("PennyKE desktop"))
+
+        val health = client.get("/v1/health")
+        assertEquals(HttpStatusCode.OK, health.status)
+        assertTrue(health.bodyAsText().contains("ok"))
+    }
+
+    private fun fullEntity(
+        hash: String,
+        amount: String,
+        currency: String,
+        type: String,
+        dateTime: String
+    ) = SyncEntity(
+        type = "transactions",
+        key = hash,
+        payload = buildJsonObject {
+            put("transactionHash", hash)
+            put("amount", amount)
+            put("currency", currency)
+            put("merchantName", "Sample $hash")
+            put("category", "Food")
+            put("transactionType", type)
+            put("dateTime", dateTime)
+            put("bankName", "M-PESA")
+            put("accountNumber", "1234")
+        },
+        updatedAt = dateTime
+    )
 
     private fun sampleEntity(
         hash: String,
