@@ -61,8 +61,8 @@ def write_config(dest: Path, env: dict[str, str], token: str) -> None:
         email = extra_email.read_text(encoding="utf-8").strip()
     phone = first(env, "TWO_FACTOR_PHONE", "2FA_PHONE")
     mail_from = first(env, "MAIL_FROM", "SMTP_FROM", default="admin@detective.co.ke")
-    smtp_host = first(env, "SMTP_HOST", default="mail.detective.co.ke")
-    smtp_port = first(env, "SMTP_PORT", default="465")
+    smtp_host = first(env, "SMTP_HOST", default="127.0.0.1")
+    smtp_port = first(env, "SMTP_PORT", default="25")
     smtp_user = first(env, "SMTP_USER", "SMTP_USERNAME")
     smtp_pass = first(env, "SMTP_PASS", "SMTP_PASSWORD")
     sms_user = first(env, "AFRICASTALKING_USERNAME", "AT_USERNAME", "SMS_USERNAME")
@@ -176,8 +176,8 @@ def ensure_smtp_mailbox(env: dict[str, str]) -> dict[str, str]:
     secret_file.chmod(stat.S_IRUSR | stat.S_IWUSR)
     return {
         "MAIL_FROM": mailbox,
-        "SMTP_HOST": first(env, "SMTP_HOST", default="mail.detective.co.ke") or "mail.detective.co.ke",
-        "SMTP_PORT": first(env, "SMTP_PORT", default="465") or "465",
+        "SMTP_HOST": first(env, "SMTP_HOST", default="127.0.0.1") or "127.0.0.1",
+        "SMTP_PORT": first(env, "SMTP_PORT", default="25") or "25",
         "SMTP_USER": mailbox,
         "SMTP_PASS": password,
     }

@@ -225,14 +225,22 @@ final class PennyKeAuth
     private function sendSmtp(string $from, string $to, string $subject, string $message): void
     {
         $host = trim((string) $this->config['smtp_host']);
-        $port = (int) ($this->config['smtp_port'] ?? 465);
+        $port = (int) ($this->config['smtp_port'] ?? 25);
         if ($port <= 0) {
-            $port = 465;
+            $port = 25;
         }
         $user = trim((string) $this->config['smtp_user']);
         $pass = (string) $this->config['smtp_pass'];
         $remote = ($port === 465 ? 'ssl://' : 'tcp://') . $host . ':' . $port;
-        $fp = @stream_socket_client($remote, $errno, $errstr, 20, STREAM_CLIENT_CONNECT);
+        $local = in_array($host, ['127.0.0.1', 'localhost', '::1'], true);
+        $ctx = stream_context_create([
+            'ssl' => [
+                'verify_peer' => !$local,
+                'verify_peer_name' => !$local,
+                'allow_self_signed' => $local,
+            ],
+        ]);
+        $fp = @stream_socket_client($remote, $errno, $errstr, 20, STREAM_CLIENT_CONNECT, $ctx);
         if ($fp === false) {
             throw new RuntimeException('smtp connect failed');
         }
@@ -250,12 +258,14 @@ final class PennyKeAuth
                 $this->smtpCmd($fp, 'EHLO pennyke.local');
                 $this->smtpExpect($fp, '250');
             }
-            $this->smtpCmd($fp, 'AUTH LOGIN');
-            $this->smtpExpect($fp, '334');
-            $this->smtpCmd($fp, base64_encode($user));
-            $this->smtpExpect($fp, '334');
-            $this->smtpCmd($fp, base64_encode($pass));
-            $this->smtpExpect($fp, '235');
+            if ($user !== '' && $pass !== '') {
+                $this->smtpCmd($fp, 'AUTH LOGIN');
+                $this->smtpExpect($fp, '334');
+                $this->smtpCmd($fp, base64_encode($user));
+                $this->smtpExpect($fp, '334');
+                $this->smtpCmd($fp, base64_encode($pass));
+                $this->smtpExpect($fp, '235');
+            }
             $this->smtpCmd($fp, 'MAIL FROM:<' . $from . '>');
             $this->smtpExpect($fp, '250');
             $this->smtpCmd($fp, 'RCPT TO:<' . $to . '>');
