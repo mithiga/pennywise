@@ -2,6 +2,7 @@ package com.pennywiseai.tracker.data.repository
 
 import com.pennywiseai.tracker.data.database.dao.MerchantMappingDao
 import com.pennywiseai.tracker.data.database.entity.MerchantMappingEntity
+import com.pennywiseai.tracker.data.sync.SyncChangeBus
 import kotlinx.coroutines.flow.Flow
 import java.time.LocalDateTime
 import javax.inject.Inject
@@ -9,7 +10,8 @@ import javax.inject.Singleton
 
 @Singleton
 class MerchantMappingRepository @Inject constructor(
-    private val merchantMappingDao: MerchantMappingDao
+    private val merchantMappingDao: MerchantMappingDao,
+    private val syncChangeBus: SyncChangeBus
 ) {
     
     suspend fun getCategoryForMerchant(merchantName: String): String? {
@@ -24,10 +26,12 @@ class MerchantMappingRepository @Inject constructor(
                 updatedAt = LocalDateTime.now()
             )
         )
+        syncChangeBus.markDirty()
     }
     
     suspend fun removeMapping(merchantName: String) {
         merchantMappingDao.deleteMapping(merchantName)
+        syncChangeBus.markDirty()
     }
     
     fun getAllMappings(): Flow<List<MerchantMappingEntity>> {

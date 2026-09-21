@@ -23,6 +23,8 @@ import com.pennywiseai.tracker.data.repository.TransactionRepository
 import com.pennywiseai.tracker.domain.model.rule.tagChanges
 import com.pennywiseai.tracker.domain.repository.RuleRepository
 import com.pennywiseai.tracker.domain.service.RuleEngine
+import com.pennywiseai.tracker.data.sync.DeviceSyncScheduler
+import com.pennywiseai.tracker.data.sync.SyncChangeBus
 import java.math.BigDecimal
 import java.time.Instant
 import java.time.LocalDateTime
@@ -46,7 +48,9 @@ class SmsTransactionProcessor @Inject constructor(
     private val ruleRepository: RuleRepository,
     private val ruleEngine: RuleEngine,
     private val tagRepository: TagRepository,
-    private val database: PennyWiseDatabase
+    private val database: PennyWiseDatabase,
+    private val syncChangeBus: SyncChangeBus,
+    private val deviceSyncScheduler: DeviceSyncScheduler
 ) {
     companion object {
         private const val TAG = "SmsTransactionProcessor"
@@ -213,6 +217,8 @@ class SmsTransactionProcessor @Inject constructor(
 
                 // Trigger widget refresh for the transaction-derived widgets
                 com.pennywiseai.tracker.widget.WidgetRefresher.refreshTransactionWidgets(appContext)
+                syncChangeBus.markDirty()
+                deviceSyncScheduler.enqueueNow()
 
                 return ProcessingResult(true, transactionId = rowId)
             } else {

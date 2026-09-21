@@ -9,6 +9,8 @@ import com.pennywiseai.tracker.data.database.entity.TransactionWithSplits
 import com.pennywiseai.tracker.data.preferences.UserPreferencesRepository
 import com.pennywiseai.tracker.data.statement.StatementTransactionEnricher
 import com.pennywiseai.tracker.data.manager.TransactionDeduplication
+import com.pennywiseai.tracker.data.sync.SyncChangeBus
+import com.pennywiseai.tracker.data.sync.SyncEntityTypes
 import com.pennywiseai.tracker.domain.model.BudgetCycle
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flatMapLatest
@@ -26,7 +28,8 @@ import kotlin.math.min
 open class TransactionRepository @Inject constructor(
     private val transactionDao: TransactionDao,
     private val transactionSplitDao: TransactionSplitDao,
-    private val userPreferencesRepository: UserPreferencesRepository
+    private val userPreferencesRepository: UserPreferencesRepository,
+    private val syncChangeBus: SyncChangeBus? = null
 ) {
     fun getAllTransactions(): Flow<List<TransactionEntity>> = 
         transactionDao.getAllTransactions()
@@ -109,14 +112,21 @@ open class TransactionRepository @Inject constructor(
         endDate: LocalDateTime
     ): Double? = transactionDao.getTotalAmountByTypeAndPeriod(type, startDate, endDate)
     
-    suspend fun insertTransaction(transaction: TransactionEntity): Long = 
-        transactionDao.insertTransaction(transaction)
+    suspend fun insertTransaction(transaction: TransactionEntity): Long {
+        val id = transactionDao.insertTransaction(transaction)
+        syncChangeBus?.markDirty()
+        return id
+    }
     
-    suspend fun insertTransactions(transactions: List<TransactionEntity>) = 
+    suspend fun insertTransactions(transactions: List<TransactionEntity>) {
         transactionDao.insertTransactions(transactions)
+        if (transactions.isNotEmpty()) syncChangeBus?.markDirty()
+    }
     
-    suspend fun updateTransaction(transaction: TransactionEntity) = 
-        transactionDao.updateTransaction(transaction)
+    suspend fun updateTransaction(transaction: TransactionEntity) {
+        transactionDao.updateTransaction(transaction.copy(updatedAt = LocalDateTime.now()))
+        syncChangeBus?.markDirty()
+    }
     
     open suspend fun deleteTransaction(transaction: TransactionEntity, hardDelete: Boolean = false) {
         if (hardDelete) {
@@ -124,13 +134,22 @@ open class TransactionRepository @Inject constructor(
         } else {
             transactionDao.softDeleteTransaction(transaction.id)
         }
+        val hash = transaction.transactionHash
+        if (hash.isNotBlank() && !hash.startsWith("DELETED_")) {
+            syncChangeBus?.markDeleted(SyncEntityTypes.TRANSACTIONS, hash)
+        }
     }
 
     suspend fun deleteTransactionById(id: Long, hardDelete: Boolean = false) {
+        val existing = transactionDao.getTransactionById(id)
         if (hardDelete) {
             transactionDao.deleteTransactionById(id)
         } else {
             transactionDao.softDeleteTransaction(id)
+        }
+        val hash = existing?.transactionHash
+        if (!hash.isNullOrBlank() && !hash.startsWith("DELETED_")) {
+            syncChangeBus?.markDeleted(SyncEntityTypes.TRANSACTIONS, hash)
         }
     }
 
@@ -216,15 +235,20 @@ open class TransactionRepository @Inject constructor(
     }
 
     open suspend fun undoDeleteTransaction(transaction: TransactionEntity) {
-        transactionDao.updateTransaction(transaction.copy(isDeleted = false))
+        transactionDao.updateTransaction(
+            transaction.copy(isDeleted = false, updatedAt = LocalDateTime.now())
+        )
+        syncChangeBus?.markDirty()
     }
     
     suspend fun updateCategoryForMerchant(merchantName: String, newCategory: String) {
-        transactionDao.updateCategoryForMerchant(merchantName, newCategory)
+        transactionDao.updateCategoryForMerchant(merchantName, newCategory, LocalDateTime.now())
+        syncChangeBus?.markDirty()
     }
 
     suspend fun updateCategory(transactionId: Long, category: String) {
         transactionDao.updateCategoryById(transactionId, category, LocalDateTime.now())
+        syncChangeBus?.markDirty()
     }
     
     suspend fun getOtherTransactionCountForMerchant(merchantName: String, excludeId: Long): Int {
@@ -244,12 +268,14 @@ open class TransactionRepository @Inject constructor(
         accountLast4: String,
         profileId: Long
     ): Int {
-        return transactionDao.setProfileForAccountTransactions(
+        val updated = transactionDao.setProfileForAccountTransactions(
             bankName,
             accountLast4,
             profileId,
             LocalDateTime.now()
         )
+        if (updated > 0) syncChangeBus?.markDirty()
+        return updated
     }
     
     // Additional methods for Home screen
@@ -367,23 +393,31 @@ open class TransactionRepository @Inject constructor(
         sourceAccountLast4: String,
         targetBankName: String,
         targetAccountLast4: String
-    ): Int = transactionDao.mergeAccountTransactions(
-        sourceBankName = sourceBankName,
-        sourceAccountLast4 = sourceAccountLast4,
-        targetBankName = targetBankName,
-        targetAccountLast4 = targetAccountLast4,
-        updatedAt = LocalDateTime.now()
-    )
+    ): Int {
+        val updated = transactionDao.mergeAccountTransactions(
+            sourceBankName = sourceBankName,
+            sourceAccountLast4 = sourceAccountLast4,
+            targetBankName = targetBankName,
+            targetAccountLast4 = targetAccountLast4,
+            updatedAt = LocalDateTime.now()
+        )
+        if (updated > 0) syncChangeBus?.markDirty()
+        return updated
+    }
 
     /** Re-target TRANSFER from/to-account refs after an account merge (#368). */
     suspend fun retargetTransferLegRefs(
         sourceAccountLast4: String,
         targetAccountLast4: String
-    ): Int = transactionDao.retargetTransferLegRefs(
-        sourceAccountLast4 = sourceAccountLast4,
-        targetAccountLast4 = targetAccountLast4,
-        updatedAt = LocalDateTime.now()
-    )
+    ): Int {
+        val updated = transactionDao.retargetTransferLegRefs(
+            sourceAccountLast4 = sourceAccountLast4,
+            targetAccountLast4 = targetAccountLast4,
+            updatedAt = LocalDateTime.now()
+        )
+        if (updated > 0) syncChangeBus?.markDirty()
+        return updated
+    }
 
     fun getTransactionsByAccountAndDateRange(
         bankName: String,

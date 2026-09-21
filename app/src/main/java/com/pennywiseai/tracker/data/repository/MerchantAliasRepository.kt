@@ -2,6 +2,7 @@ package com.pennywiseai.tracker.data.repository
 
 import com.pennywiseai.tracker.data.database.dao.MerchantAliasDao
 import com.pennywiseai.tracker.data.database.entity.MerchantAliasEntity
+import com.pennywiseai.tracker.data.sync.SyncChangeBus
 import kotlinx.coroutines.flow.Flow
 import java.time.LocalDateTime
 import javax.inject.Inject
@@ -9,7 +10,8 @@ import javax.inject.Singleton
 
 @Singleton
 class MerchantAliasRepository @Inject constructor(
-    private val merchantAliasDao: MerchantAliasDao
+    private val merchantAliasDao: MerchantAliasDao,
+    private val syncChangeBus: SyncChangeBus
 ) {
 
     suspend fun getAliasForMerchant(merchantName: String): String? {
@@ -24,10 +26,12 @@ class MerchantAliasRepository @Inject constructor(
                 updatedAt = LocalDateTime.now()
             )
         )
+        syncChangeBus.markDirty()
     }
 
     suspend fun removeAlias(merchantName: String) {
         merchantAliasDao.deleteAlias(merchantName)
+        syncChangeBus.markDirty()
     }
 
     fun getAllAliases(): Flow<List<MerchantAliasEntity>> {

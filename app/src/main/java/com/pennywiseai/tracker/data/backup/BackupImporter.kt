@@ -7,6 +7,9 @@ import androidx.room.withTransaction
 import com.pennywiseai.tracker.data.database.PennyWiseDatabase
 import com.pennywiseai.tracker.data.database.entity.*
 import com.pennywiseai.tracker.data.preferences.UserPreferencesRepository
+import com.pennywiseai.tracker.data.sync.SyncEntityTypes
+import com.pennywiseai.tracker.data.sync.SyncMerge
+import com.pennywiseai.tracker.data.sync.SyncTombstone
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -51,6 +54,35 @@ class BackupImporter @Inject constructor(
         } catch (e: Exception) {
             Log.e("BackupImporter", "Import failed", e)
             ImportResult.Error("Import failed: ${e.message}")
+        }
+    }
+
+    /**
+     * Merge an in-memory snapshot (live device sync). File import keeps
+     * [importBackup] so existing restore behaviour is unchanged.
+     */
+    suspend fun importBackupSnapshot(
+        backup: PennyWiseBackup,
+        applyPreferences: Boolean = false,
+        updateExistingIfNewer: Boolean = true,
+        syncSafePreferences: Boolean = true
+    ): ImportResult = withContext(Dispatchers.IO) {
+        mergeData(
+            backup = backup,
+            applyPreferences = applyPreferences,
+            updateExistingIfNewer = updateExistingIfNewer,
+            syncSafePreferences = syncSafePreferences
+        )
+    }
+
+    suspend fun applyTombstones(deletes: List<SyncTombstone>) = withContext(Dispatchers.IO) {
+        deletes.forEach { tombstone ->
+            if (tombstone.type == SyncEntityTypes.TRANSACTIONS && tombstone.key.isNotBlank()) {
+                val existing = database.transactionDao().getTransactionByHash(tombstone.key)
+                if (existing != null && !existing.isDeleted) {
+                    database.transactionDao().softDeleteTransaction(existing.id)
+                }
+            }
         }
     }
     
@@ -313,7 +345,12 @@ class BackupImporter @Inject constructor(
     /**
      * Merge backup data with existing data
      */
-    private suspend fun mergeData(backup: PennyWiseBackup): ImportResult {
+    private suspend fun mergeData(
+        backup: PennyWiseBackup,
+        applyPreferences: Boolean = true,
+        updateExistingIfNewer: Boolean = false,
+        syncSafePreferences: Boolean = false
+    ): ImportResult {
         var importedTransactions = 0
         var importedCategories = 0
         var skippedDuplicates = 0
@@ -326,6 +363,7 @@ class BackupImporter @Inject constructor(
                     .getAllTransactions().first()
                 val existingTransactionHashes = existingTransactions.map { it.transactionHash }.toSet()
                 val existingHashToIdMap = existingTransactions.associateBy({ it.transactionHash }, { it.id })
+                val existingByHash = existingTransactions.associateBy { it.transactionHash }
 
                 val existingCategoryRows = database.categoryDao().getAllCategories().first()
                 val existingCategories = existingCategoryRows.map { it.name }.toSet()
@@ -428,6 +466,19 @@ class BackupImporter @Inject constructor(
                             oldToNewTransactionIdMap[transaction.id] = localId
                         }
                         skippedDuplicates++
+                        if (updateExistingIfNewer) {
+                            val local = existingByHash[transaction.transactionHash]
+                            if (local != null && SyncMerge.shouldReplaceLocalTransaction(local, transaction)) {
+                                database.transactionDao().updateTransaction(
+                                    transaction.copy(
+                                        id = local.id,
+                                        loanId = transaction.loanId?.let { oldToNewLoanIdMap[it] } ?: local.loanId,
+                                        groupId = transaction.groupId?.let { oldToNewGroupIdMap[it] } ?: local.groupId,
+                                        profileId = resolveProfileId(transaction.profileId) ?: local.profileId
+                                    )
+                                )
+                            }
+                        }
                     }
                 }
                 
@@ -548,8 +599,12 @@ class BackupImporter @Inject constructor(
                     }
                 }
 
-                // Import preferences (merge with existing)
-                importPreferences(backup.preferences)
+                // Import preferences (merge with existing). Live sync only applies
+                // a patch when the other phone actually changed settings, and
+                // skips device-local SMS-scan cursors so each inbox stays independent.
+                if (applyPreferences) {
+                    importPreferences(backup.preferences, syncSafe = syncSafePreferences)
+                }
                 
                 ImportResult.Success(
                     importedTransactions = importedTransactions,
@@ -789,47 +844,56 @@ class BackupImporter @Inject constructor(
     /**
      * Import user preferences
      */
-    private suspend fun importPreferences(preferences: PreferencesSnapshot) {
+    private suspend fun importPreferences(
+        preferences: PreferencesSnapshot,
+        syncSafe: Boolean = false
+    ) {
         // Theme preferences
         preferences.theme.isDarkThemeEnabled?.let {
             userPreferencesRepository.updateDarkTheme(it)
         }
         userPreferencesRepository.updateDynamicColor(preferences.theme.isDynamicColorEnabled)
-        
-        // SMS preferences
-        userPreferencesRepository.updateHasSkippedSmsPermission(preferences.sms.hasSkippedSmsPermission)
+
+        // SMS preferences — scan cursors and permission skip are per-device.
+        if (!syncSafe) {
+            userPreferencesRepository.updateHasSkippedSmsPermission(preferences.sms.hasSkippedSmsPermission)
+        }
         userPreferencesRepository.updateSmsScanMonths(preferences.sms.smsScanMonths)
         // Only enable custom-date mode when a paired date is present. A flag-without-date
         // state would leave a "Scan from a custom start date" subtitle while the limited-data
         // banner is suppressed (TransactionsViewModel can't resolve a start date).
-        val restoredCustomDate = preferences.sms.smsScanCustomDate
-        restoredCustomDate?.let {
-            userPreferencesRepository.updateSmsScanCustomDate(it)
+        if (!syncSafe) {
+            val restoredCustomDate = preferences.sms.smsScanCustomDate
+            restoredCustomDate?.let {
+                userPreferencesRepository.updateSmsScanCustomDate(it)
+            }
+            userPreferencesRepository.updateSmsScanUseCustomDate(
+                preferences.sms.smsScanUseCustomDate && restoredCustomDate != null
+            )
+            preferences.sms.lastScanTimestamp?.let {
+                userPreferencesRepository.updateLastScanTimestamp(it)
+            }
+            preferences.sms.lastScanPeriod?.let {
+                userPreferencesRepository.updateLastScanPeriod(it)
+            }
         }
-        userPreferencesRepository.updateSmsScanUseCustomDate(
-            preferences.sms.smsScanUseCustomDate && restoredCustomDate != null
-        )
-        preferences.sms.lastScanTimestamp?.let {
-            userPreferencesRepository.updateLastScanTimestamp(it)
-        }
-        preferences.sms.lastScanPeriod?.let {
-            userPreferencesRepository.updateLastScanPeriod(it)
-        }
-        
+
         // Developer preferences
         userPreferencesRepository.updateDeveloperMode(preferences.developer.isDeveloperModeEnabled)
         preferences.developer.systemPrompt?.let {
             userPreferencesRepository.updateSystemPrompt(it)
         }
-        
-        // App preferences
-        userPreferencesRepository.updateHasShownScanTutorial(preferences.app.hasShownScanTutorial)
-        preferences.app.firstLaunchTime?.let {
-            userPreferencesRepository.updateFirstLaunchTime(it)
-        }
-        userPreferencesRepository.updateHasShownReviewPrompt(preferences.app.hasShownReviewPrompt)
-        preferences.app.lastReviewPromptTime?.let {
-            userPreferencesRepository.updateLastReviewPromptTime(it)
+
+        // App preferences — first-launch / review prompts stay on the phone that saw them.
+        if (!syncSafe) {
+            userPreferencesRepository.updateHasShownScanTutorial(preferences.app.hasShownScanTutorial)
+            preferences.app.firstLaunchTime?.let {
+                userPreferencesRepository.updateFirstLaunchTime(it)
+            }
+            userPreferencesRepository.updateHasShownReviewPrompt(preferences.app.hasShownReviewPrompt)
+            preferences.app.lastReviewPromptTime?.let {
+                userPreferencesRepository.updateLastReviewPromptTime(it)
+            }
         }
     }
 }

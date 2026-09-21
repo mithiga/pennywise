@@ -104,3 +104,14 @@ iosApp/fastlane/report.xml
 
 # git worktrees (superpowers SDD)
 .worktrees/
+
+# Python
+scripts/__pycache__/
+*.pyc
+sync-server/data/
+build/pennyKE/
+hosting/cpanel/api/config.php
+
+# Desktop dashboard (Vite) — source is tracked; install/build output is not
+dashboard/node_modules/
+dashboard/dist/

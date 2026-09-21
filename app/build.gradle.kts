@@ -17,7 +17,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.pennywiseai.tracker"
+        applicationId = "com.mithiga.pennywise"
         minSdk = 26
         targetSdk = 36
         versionCode = 103
@@ -40,21 +40,17 @@ android {
     }
 
     signingConfigs {
-        // Only create signing config for non-F-Droid builds
-        if (!gradle.startParameter.taskNames.any { it.contains("fdroid", ignoreCase = true) }) {
-            val localPropertiesFile = rootProject.file("local.properties")
-            if (localPropertiesFile.exists()) {
+        val localPropertiesFile = rootProject.file("local.properties")
+        if (localPropertiesFile.exists()) {
+            val localProperties = Properties()
+            localProperties.load(localPropertiesFile.inputStream())
+            val keystorePath = localProperties.getProperty("RELEASE_STORE_FILE", "")
+            if (keystorePath.isNotEmpty()) {
                 create("release") {
-                    val localProperties = Properties()
-                    localProperties.load(localPropertiesFile.inputStream())
-                    
-                    val keystorePath = localProperties.getProperty("RELEASE_STORE_FILE", "")
-                    if (keystorePath.isNotEmpty()) {
-                        storeFile = file(keystorePath)
-                        storePassword = localProperties.getProperty("RELEASE_STORE_PASSWORD", "")
-                        keyAlias = localProperties.getProperty("RELEASE_KEY_ALIAS", "")
-                        keyPassword = localProperties.getProperty("RELEASE_KEY_PASSWORD", "")
-                    }
+                    storeFile = file(keystorePath)
+                    storePassword = localProperties.getProperty("RELEASE_STORE_PASSWORD", "")
+                    keyAlias = localProperties.getProperty("RELEASE_KEY_ALIAS", "")
+                    keyPassword = localProperties.getProperty("RELEASE_KEY_PASSWORD", "")
                 }
             }
         }
@@ -114,16 +110,9 @@ android {
                 "proguard-rules.pro"
             )
             
-            // Only apply signing config to standard flavor
-            for (flavor in productFlavors) {
-                if (flavor.name == "standard") {
-                    // Check if release signing config exists
-                    val releaseSigningConfig = signingConfigs.findByName("release")
-                    // Only use release signing if keystore is configured
-                    if (releaseSigningConfig != null && releaseSigningConfig.storeFile != null) {
-                        signingConfig = releaseSigningConfig
-                    }
-                }
+            val releaseSigningConfig = signingConfigs.findByName("release")
+            if (releaseSigningConfig != null && releaseSigningConfig.storeFile != null) {
+                signingConfig = releaseSigningConfig
             }
             
             // Include debug symbols for native crashes

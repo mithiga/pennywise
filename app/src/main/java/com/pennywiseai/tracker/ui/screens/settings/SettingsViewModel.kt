@@ -69,6 +69,8 @@ class SettingsViewModel @Inject constructor(
     private val folderBackupWriter: FolderBackupWriter,
     private val scheduledFolderBackupScheduler: ScheduledFolderBackupScheduler,
     private val contactsResolver: com.pennywiseai.tracker.data.contacts.ContactsResolver,
+    private val deviceSyncScheduler: com.pennywiseai.tracker.data.sync.DeviceSyncScheduler,
+    private val syncCoordinator: com.pennywiseai.tracker.data.sync.SyncCoordinator,
     entitlementGate: EntitlementGate,
 ) : ViewModel() {
 
@@ -123,6 +125,12 @@ class SettingsViewModel @Inject constructor(
 
     val scheduledFolderBackupEnabled = userPreferencesRepository.scheduledFolderBackupEnabled
     val scheduledFolderBackupLastTimestamp = userPreferencesRepository.scheduledFolderBackupLastTimestamp
+
+    val deviceSyncEnabled = userPreferencesRepository.deviceSyncEnabled
+    val deviceSyncServerUrl = userPreferencesRepository.deviceSyncServerUrl
+    val deviceSyncToken = userPreferencesRepository.deviceSyncToken
+    val deviceSyncDeviceName = userPreferencesRepository.deviceSyncDeviceName
+    val deviceSyncLastStatus = userPreferencesRepository.deviceSyncLastStatus
 
     private val _requestFolderPicker = MutableStateFlow(false)
     val requestFolderPicker: StateFlow<Boolean> = _requestFolderPicker.asStateFlow()
@@ -835,6 +843,39 @@ class SettingsViewModel @Inject constructor(
     fun requestChangeBackupFolder() {
         currentFolderPickerAction = FolderPickerAction.CHANGE
         _requestFolderPicker.value = true
+    }
+
+    fun setDeviceSyncEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            userPreferencesRepository.setDeviceSyncEnabled(enabled)
+            if (enabled) {
+                userPreferencesRepository.setDeviceSyncDirty(true)
+                deviceSyncScheduler.schedulePeriodic()
+                deviceSyncScheduler.enqueueNow()
+            } else {
+                deviceSyncScheduler.cancelPeriodic()
+            }
+        }
+    }
+
+    fun setDeviceSyncServerUrl(url: String) {
+        viewModelScope.launch { userPreferencesRepository.setDeviceSyncServerUrl(url.trim()) }
+    }
+
+    fun setDeviceSyncToken(token: String) {
+        viewModelScope.launch { userPreferencesRepository.setDeviceSyncToken(token.trim()) }
+    }
+
+    fun setDeviceSyncDeviceName(name: String) {
+        viewModelScope.launch { userPreferencesRepository.setDeviceSyncDeviceName(name.trim()) }
+    }
+
+    fun syncNow() {
+        viewModelScope.launch {
+            userPreferencesRepository.setDeviceSyncDirty(true)
+            val result = syncCoordinator.sync()
+            _importExportMessage.value = result.getOrElse { it.message ?: "Sync failed" }
+        }
     }
 
     fun onFolderPickerLaunched() {

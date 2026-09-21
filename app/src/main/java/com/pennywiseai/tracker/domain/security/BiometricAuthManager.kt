@@ -7,6 +7,7 @@ import androidx.biometric.BiometricManager.Authenticators.DEVICE_CREDENTIAL
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
+import com.pennywiseai.tracker.R
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -71,7 +72,7 @@ class BiometricAuthManager @Inject constructor(
      */
     fun authenticate(
         activity: FragmentActivity,
-        title: String = "Unlock PennyWise",
+        title: String = "Unlock ${context.getString(R.string.app_name)}",
         subtitle: String = "Authenticate to access your expense data",
         description: String = "Use your biometric credential or device PIN",
         onSuccess: () -> Unit,

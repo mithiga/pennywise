@@ -26,6 +26,13 @@ class BackupExporter @Inject constructor(
 ) {
     
     /**
+     * In-memory snapshot used by live device sync.
+     */
+    suspend fun createBackupSnapshot(
+        privacy: ExportPrivacy = ExportPrivacy.FULL
+    ): PennyWiseBackup = createBackup(privacy)
+
+    /**
      * Export complete app data to a backup file
      */
     suspend fun exportBackup(

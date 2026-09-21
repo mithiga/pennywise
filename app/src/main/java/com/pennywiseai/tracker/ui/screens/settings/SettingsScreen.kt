@@ -137,6 +137,11 @@ fun SettingsScreen(
     val isProEntitled by settingsViewModel.isProEntitled.collectAsStateWithLifecycle()
     val scheduledFolderBackupEnabled by settingsViewModel.scheduledFolderBackupEnabled.collectAsStateWithLifecycle(initialValue = false)
     val scheduledFolderBackupLastTimestamp by settingsViewModel.scheduledFolderBackupLastTimestamp.collectAsStateWithLifecycle(initialValue = null)
+    val deviceSyncEnabled by settingsViewModel.deviceSyncEnabled.collectAsStateWithLifecycle(initialValue = false)
+    val deviceSyncServerUrl by settingsViewModel.deviceSyncServerUrl.collectAsStateWithLifecycle(initialValue = "")
+    val deviceSyncToken by settingsViewModel.deviceSyncToken.collectAsStateWithLifecycle(initialValue = "")
+    val deviceSyncDeviceName by settingsViewModel.deviceSyncDeviceName.collectAsStateWithLifecycle(initialValue = "")
+    val deviceSyncLastStatus by settingsViewModel.deviceSyncLastStatus.collectAsStateWithLifecycle(initialValue = "")
     val requestFolderPicker by settingsViewModel.requestFolderPicker.collectAsStateWithLifecycle()
     var showUpgradeSheet by remember { mutableStateOf(false) }
     var showSupportDialog by remember { mutableStateOf(false) }
@@ -158,6 +163,7 @@ fun SettingsScreen(
     var showDisplayCurrencyDialog by remember { mutableStateOf(false) }
     var showNumberFormatDialog by remember { mutableStateOf(false) }
     var showBudgetCycleDialog by remember { mutableStateOf(false) }
+    var showDeviceSyncDialog by remember { mutableStateOf(false) }
     var showCurrencyDropdown by remember { mutableStateOf(false) }
     var showMainAccountDropdown by remember { mutableStateOf(false) }
     val permissionUiState by permissionViewModel.uiState.collectAsStateWithLifecycle()
@@ -514,6 +520,53 @@ fun SettingsScreen(
                 }
             }
 
+            // ── Device sync ──
+            SectionHeaderV2(title = "Device sync")
+            SettingsGroup {
+                SettingsSwitchRow(
+                    icon = Icons.Default.Sync,
+                    iconBgColor = teal_light,
+                    iconTint = teal_dark,
+                    title = "Sync with another phone",
+                    subtitle = if (deviceSyncEnabled) {
+                        deviceSyncLastStatus.ifBlank { "On — both phones share one ledger" }
+                    } else {
+                        "Off by default. Pair a self-hosted sync server."
+                    },
+                    checked = deviceSyncEnabled,
+                    onCheckedChange = { enabled ->
+                        if (enabled && (deviceSyncServerUrl.isBlank() || deviceSyncToken.isBlank())) {
+                            showDeviceSyncDialog = true
+                        } else {
+                            settingsViewModel.setDeviceSyncEnabled(enabled)
+                        }
+                    },
+                    position = ListItemPosition.Top
+                )
+                SettingsNavItem(
+                    icon = Icons.Default.Cloud,
+                    iconBgColor = blue_light,
+                    iconTint = blue_dark,
+                    title = "Server and pairing token",
+                    subtitle = if (deviceSyncServerUrl.isBlank()) {
+                        "Set URL from PAIRING.txt on your server"
+                    } else {
+                        deviceSyncServerUrl
+                    },
+                    onClick = { showDeviceSyncDialog = true },
+                    position = ListItemPosition.Middle
+                )
+                SettingsNavItem(
+                    icon = Icons.Default.Sync,
+                    iconBgColor = green_light,
+                    iconTint = green_dark,
+                    title = "Sync now",
+                    subtitle = deviceSyncLastStatus.ifBlank { "Push this phone and pull the other" },
+                    onClick = { settingsViewModel.syncNow() },
+                    position = ListItemPosition.Bottom
+                )
+            }
+
             // ── Data Management ──
             SectionHeaderV2(title = "Data Management")
             SettingsGroup {
@@ -788,7 +841,7 @@ fun SettingsScreen(
             // App Version
             Spacer(modifier = Modifier.height(Spacing.sm))
             Text(
-                text = "PennyWise v${com.pennywiseai.tracker.BuildConfig.VERSION_NAME}",
+                text = "${stringResource(R.string.app_name)} v${com.pennywiseai.tracker.BuildConfig.VERSION_NAME}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.fillMaxWidth(),
@@ -851,6 +904,63 @@ fun SettingsScreen(
     }
 
     // Number Format Dialog
+    if (showDeviceSyncDialog) {
+        var url by remember { mutableStateOf(deviceSyncServerUrl) }
+        var token by remember { mutableStateOf(deviceSyncToken) }
+        var name by remember { mutableStateOf(deviceSyncDeviceName) }
+        AlertDialog(
+            onDismissRequest = { showDeviceSyncDialog = false },
+            title = { Text("Device sync") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                    Text(
+                        "Install this app on both phones. Run the self-hosted sync-server, then paste the URL and PAIRING.txt token here.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    OutlinedTextField(
+                        value = url,
+                        onValueChange = { url = it },
+                        label = { Text("Server URL") },
+                        placeholder = { Text("http://192.168.1.10:8080") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = token,
+                        onValueChange = { token = it },
+                        label = { Text("Pairing token") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = name,
+                        onValueChange = { name = it },
+                        label = { Text("This phone's name") },
+                        placeholder = { Text("M-PESA phone") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        settingsViewModel.setDeviceSyncServerUrl(url)
+                        settingsViewModel.setDeviceSyncToken(token)
+                        settingsViewModel.setDeviceSyncDeviceName(name)
+                        if (url.isNotBlank() && token.isNotBlank()) {
+                            settingsViewModel.setDeviceSyncEnabled(true)
+                        }
+                        showDeviceSyncDialog = false
+                    }
+                ) { Text("Save") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeviceSyncDialog = false }) { Text("Cancel") }
+            }
+        )
+    }
+
     if (showNumberFormatDialog) {
         AlertDialog(
             onDismissRequest = { showNumberFormatDialog = false },
