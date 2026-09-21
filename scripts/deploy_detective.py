@@ -60,7 +60,11 @@ def write_config(dest: Path, env: dict[str, str], token: str) -> None:
     if not email and extra_email.is_file():
         email = extra_email.read_text(encoding="utf-8").strip()
     phone = first(env, "TWO_FACTOR_PHONE", "2FA_PHONE")
-    mail_from = first(env, "MAIL_FROM", "SMTP_FROM", default="noreply@detective.co.ke")
+    mail_from = first(env, "MAIL_FROM", "SMTP_FROM", default="admin@detective.co.ke")
+    smtp_host = first(env, "SMTP_HOST", default="mail.detective.co.ke")
+    smtp_port = first(env, "SMTP_PORT", default="465")
+    smtp_user = first(env, "SMTP_USER", "SMTP_USERNAME")
+    smtp_pass = first(env, "SMTP_PASS", "SMTP_PASSWORD")
     sms_user = first(env, "AFRICASTALKING_USERNAME", "AT_USERNAME", "SMS_USERNAME")
     sms_key = first(env, "AFRICASTALKING_API_KEY", "AT_API_KEY", "SMS_API_KEY")
     sms_url = first(env, "SMS_URL", "TWO_FACTOR_SMS_URL")
@@ -78,6 +82,10 @@ def write_config(dest: Path, env: dict[str, str], token: str) -> None:
         f"    'two_factor_email' => {php_str(email)},\n"
         f"    'two_factor_phone' => {php_str(phone)},\n"
         f"    'mail_from' => {php_str(mail_from)},\n"
+        f"    'smtp_host' => {php_str(smtp_host)},\n"
+        f"    'smtp_port' => {int(smtp_port or 465)},\n"
+        f"    'smtp_user' => {php_str(smtp_user)},\n"
+        f"    'smtp_pass' => {php_str(smtp_pass)},\n"
         f"    'sms_username' => {php_str(sms_user)},\n"
         f"    'sms_api_key' => {php_str(sms_key)},\n"
         f"    'sms_url' => {php_str(sms_url)},\n"
@@ -86,6 +94,93 @@ def write_config(dest: Path, env: dict[str, str], token: str) -> None:
         encoding="utf-8",
     )
     dest.chmod(stat.S_IRUSR | stat.S_IWUSR)
+
+
+def cpanel_opener(env: dict[str, str]):
+    import http.cookiejar
+    import ssl
+    import urllib.parse
+    import urllib.request
+
+    user = first(env, "CPANEL_USER", "CPANEL_USERNAME")
+    password = first(env, "CPANEL_PASSWORD", "CPANEL_PASS")
+    if not user or not password:
+        return None, ""
+    ctx = ssl.create_default_context()
+    jar = http.cookiejar.CookieJar()
+    opener = urllib.request.build_opener(
+        urllib.request.HTTPCookieProcessor(jar),
+        urllib.request.HTTPSHandler(context=ctx),
+    )
+    payload = urllib.parse.urlencode({"user": user, "pass": password}).encode()
+    req = urllib.request.Request("https://detective.co.ke:2083/login/?login_only=1", data=payload)
+    with opener.open(req, timeout=20) as resp:
+        body = json.loads(resp.read().decode("utf-8", "replace"))
+    token = body.get("security_token") or ""
+    if body.get("status") != 1 or not token:
+        raise RuntimeError("cPanel login failed")
+    return opener, token
+
+
+def ensure_smtp_mailbox(env: dict[str, str]) -> dict[str, str]:
+    """Create pennyke@<domain> if needed and return SMTP settings. Never prints secrets."""
+    if first(env, "SMTP_USER", "SMTP_USERNAME") and first(env, "SMTP_PASS", "SMTP_PASSWORD"):
+        return {}
+    secret_file = Path("/tmp/pennyke-smtp.pass")
+    password = secret_file.read_text(encoding="utf-8").strip() if secret_file.is_file() else secrets.token_urlsafe(18)
+    try:
+        opener, token = cpanel_opener(env)
+    except Exception as exc:
+        print(f"cPanel mail setup skipped: {type(exc).__name__}")
+        return {}
+    if opener is None:
+        return {}
+    import urllib.parse
+    import urllib.request
+
+    domain = "detective.co.ke"
+    local = "pennyke"
+    mailbox = f"{local}@{domain}"
+    listed = opener.open(
+        f"https://detective.co.ke:2083{token}/execute/Email/list_pops", timeout=20
+    )
+    accounts = json.loads(listed.read().decode("utf-8", "replace"))
+    emails = [row.get("email") for row in (accounts.get("data") or []) if isinstance(row, dict)]
+    if mailbox not in emails:
+        qs = urllib.parse.urlencode(
+            {"email": local, "password": password, "quota": 250, "domain": domain}
+        )
+        created = opener.open(
+            f"https://detective.co.ke:2083{token}/execute/Email/add_pop?{qs}", timeout=20
+        )
+        result = json.loads(created.read().decode("utf-8", "replace"))
+        if not result.get("status"):
+            print("cPanel add_pop did not succeed; falling back to PHP mail()")
+            return {}
+        print("Created domain mailbox for OTP mail")
+    else:
+        qs = urllib.parse.urlencode(
+            {"email": local, "password": password, "domain": domain}
+        )
+        changed = opener.open(
+            f"https://detective.co.ke:2083{token}/execute/Email/passwd_pop?{qs}", timeout=20
+        )
+        result = json.loads(changed.read().decode("utf-8", "replace"))
+        if not result.get("status"):
+            print("Existing mailbox password was left unchanged")
+            if not secret_file.is_file():
+                return {}
+        else:
+            print("Updated domain mailbox password for OTP mail")
+    secret_file.write_text(password + "\n", encoding="utf-8")
+    secret_file.chmod(stat.S_IRUSR | stat.S_IWUSR)
+    return {
+        "MAIL_FROM": mailbox,
+        "SMTP_HOST": first(env, "SMTP_HOST", default="mail.detective.co.ke") or "mail.detective.co.ke",
+        "SMTP_PORT": first(env, "SMTP_PORT", default="465") or "465",
+        "SMTP_USER": mailbox,
+        "SMTP_PASS": password,
+    }
 
 
 def iter_files(root: Path):
@@ -199,6 +294,8 @@ def main() -> int:
         print("dashboard/dist missing — run PENNYKE_BASE=/pennyKE/ npm --prefix dashboard run build", file=sys.stderr)
         return 2
 
+    mail_settings = ensure_smtp_mailbox(env)
+    env = {**env, **mail_settings}
     write_config(staging / "api" / "config.php", env, token)
     # Do not upload examples or the PHP unit runner.
     for extra_file in [

@@ -11,6 +11,8 @@ Dashboard login is two-step. The pairing token alone cannot read or edit the led
 
 Set `TWO_FACTOR_EMAIL` (and optionally `TWO_FACTOR_PHONE` plus Africa's Talking `AFRICASTALKING_USERNAME` / `AFRICASTALKING_API_KEY`, or `SMS_URL`) in the deploy `.env`. Never commit those values.
 
+OTP email is sent from a real domain mailbox over SMTP (`pennyke@` on this host). PHP `mail()` from a non-existent `noreply@` address is rejected by cPanel/Exim.
+
 Deploy:
 
 ```bash

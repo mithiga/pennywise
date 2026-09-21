@@ -188,15 +188,107 @@ final class PennyKeAuth
         }
         $message = "Your PennyKE sign-in code is {$code}. It expires in 10 minutes. If you did not try to sign in, ignore this.";
         if ($channel === 'email') {
-            $from = trim((string) ($this->config['mail_from'] ?? 'noreply@detective.co.ke'));
-            $headers = "From: PennyKE <{$from}>\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8";
-            $ok = @mail($destination, 'PennyKE sign-in code', $message, $headers, '-f ' . $from);
-            if ($ok === false) {
-                throw new RuntimeException('mail failed');
-            }
+            $this->sendEmail($destination, $message);
             return;
         }
         $this->sendSms($destination, $message);
+    }
+
+    private function sendEmail(string $to, string $message): void
+    {
+        $from = trim((string) ($this->config['mail_from'] ?? 'admin@detective.co.ke'));
+        if ($from === '') {
+            $from = 'admin@detective.co.ke';
+        }
+        $subject = 'PennyKE sign-in code';
+        if ($this->smtpConfigured()) {
+            $this->sendSmtp($from, $to, $subject, $message);
+            return;
+        }
+        $headers = "From: PennyKE <{$from}>\r\nReply-To: {$from}\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8";
+        if (@mail($to, $subject, $message, $headers) === true) {
+            return;
+        }
+        if (@mail($to, $subject, $message, $headers, '-f ' . $from) === true) {
+            return;
+        }
+        throw new RuntimeException('mail failed');
+    }
+
+    private function smtpConfigured(): bool
+    {
+        return trim((string) ($this->config['smtp_host'] ?? '')) !== ''
+            && trim((string) ($this->config['smtp_user'] ?? '')) !== ''
+            && trim((string) ($this->config['smtp_pass'] ?? '')) !== '';
+    }
+
+    private function sendSmtp(string $from, string $to, string $subject, string $message): void
+    {
+        $host = trim((string) $this->config['smtp_host']);
+        $port = (int) ($this->config['smtp_port'] ?? 465);
+        if ($port <= 0) {
+            $port = 465;
+        }
+        $user = trim((string) $this->config['smtp_user']);
+        $pass = (string) $this->config['smtp_pass'];
+        $remote = ($port === 465 ? 'ssl://' : 'tcp://') . $host . ':' . $port;
+        $fp = @stream_socket_client($remote, $errno, $errstr, 20, STREAM_CLIENT_CONNECT);
+        if ($fp === false) {
+            throw new RuntimeException('smtp connect failed');
+        }
+        stream_set_timeout($fp, 20);
+        try {
+            $this->smtpExpect($fp, '220');
+            $this->smtpCmd($fp, 'EHLO pennyke.local');
+            $this->smtpExpect($fp, '250');
+            if ($port === 587) {
+                $this->smtpCmd($fp, 'STARTTLS');
+                $this->smtpExpect($fp, '220');
+                if (!stream_socket_enable_crypto($fp, true, STREAM_CRYPTO_METHOD_TLS_CLIENT)) {
+                    throw new RuntimeException('smtp tls failed');
+                }
+                $this->smtpCmd($fp, 'EHLO pennyke.local');
+                $this->smtpExpect($fp, '250');
+            }
+            $this->smtpCmd($fp, 'AUTH LOGIN');
+            $this->smtpExpect($fp, '334');
+            $this->smtpCmd($fp, base64_encode($user));
+            $this->smtpExpect($fp, '334');
+            $this->smtpCmd($fp, base64_encode($pass));
+            $this->smtpExpect($fp, '235');
+            $this->smtpCmd($fp, 'MAIL FROM:<' . $from . '>');
+            $this->smtpExpect($fp, '250');
+            $this->smtpCmd($fp, 'RCPT TO:<' . $to . '>');
+            $this->smtpExpect($fp, '250');
+            $this->smtpCmd($fp, 'DATA');
+            $this->smtpExpect($fp, '354');
+            $safeBody = preg_replace('/^\./m', '..', $message) ?? $message;
+            fwrite($fp, 'From: PennyKE <' . $from . ">\r\n");
+            fwrite($fp, 'To: <' . $to . ">\r\n");
+            fwrite($fp, 'Subject: ' . $subject . "\r\n");
+            fwrite($fp, "MIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n");
+            fwrite($fp, $safeBody . "\r\n.\r\n");
+            $this->smtpExpect($fp, '250');
+            $this->smtpCmd($fp, 'QUIT');
+        } finally {
+            fclose($fp);
+        }
+    }
+
+    private function smtpCmd($fp, string $line): void
+    {
+        fwrite($fp, $line . "\r\n");
+    }
+
+    private function smtpExpect($fp, string $prefix): void
+    {
+        $line = fgets($fp, 1024);
+        if ($line === false || !str_starts_with($line, $prefix)) {
+            throw new RuntimeException('smtp handshake failed');
+        }
+        while ($line !== false && isset($line[3]) && $line[3] === '-') {
+            $line = fgets($fp, 1024);
+        }
     }
 
     private function sendSms(string $phone, string $message): void
